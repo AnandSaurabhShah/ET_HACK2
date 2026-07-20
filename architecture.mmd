@@ -1,0 +1,34 @@
+flowchart LR
+  subgraph Frontend["frontend/ Pariksha Kendra"]
+    Candidate["Candidate"]
+    Invigilator["Invigilator"]
+    Examiner["Examiner"]
+    Cert["Certificate Verification"]
+    SOC["Security SOC Command Center"]
+  end
+
+  subgraph Backend["backend/ FastAPI"]
+    Ingest["/ingest/events"]
+    Baseline["baseline_agent"]
+    Anomaly["anomaly_agent<br/>IsolationForest + z-score"]
+    Attrib["attribution_agent<br/>ATT&CK RAG"]
+    SOAR["orchestrator_agent<br/>playbooks + approval gate"]
+    CVE["cve_agent"]
+    Twin["graph_agent<br/>networkx digital twin"]
+    Audit["hash-chained audit log"]
+    Eval["app/eval harness"]
+  end
+
+  Candidate --> Ingest
+  Invigilator --> Ingest
+  Examiner --> Ingest
+  Cert --> Ingest
+  SOC -->|fetch/SSE| Backend
+  Ingest --> Baseline --> Anomaly --> Attrib --> SOAR --> Audit
+  Attrib --> CVE
+  Attrib --> Twin
+  Anomaly --> Eval
+  Attrib --> Eval
+  Eval --> SOC
+  Audit --> SOC
+

@@ -1,0 +1,11 @@
+frontend/node_modules/
+frontend/dist/
+frontend/frontend-vite.log
+frontend/frontend-vite.err.log
+backend/backend-uvicorn.log
+backend/backend-uvicorn.err.log
+backend/**/__pycache__/
+backend/app/rag/chroma/
+backend/app/data/*.db
+backend/app/data/*.db-*
+.pytest_cache/

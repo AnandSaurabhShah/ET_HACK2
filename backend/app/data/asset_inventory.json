@@ -1,0 +1,32 @@
+[
+  {
+    "asset_id": "candidate-portal",
+    "name": "Candidate Portal",
+    "criticality": 5,
+    "owner": "Exam Ops"
+  },
+  {
+    "asset_id": "proctoring",
+    "name": "Invigilator Portal",
+    "criticality": 4,
+    "owner": "Centre Ops"
+  },
+  {
+    "asset_id": "marking",
+    "name": "Examiner Marking Portal",
+    "criticality": 5,
+    "owner": "Evaluation"
+  },
+  {
+    "asset_id": "certificate-service",
+    "name": "Certificate Verification Service",
+    "criticality": 4,
+    "owner": "Public Trust"
+  },
+  {
+    "asset_id": "auth-db",
+    "name": "Auth DB",
+    "criticality": 5,
+    "owner": "Identity"
+  }
+]

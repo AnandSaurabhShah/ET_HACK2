@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="520" viewBox="0 0 1080 520" role="img" aria-labelledby="title desc">
+  <title id="title">Aegis-CNI architecture</title>
+  <desc id="desc">Exam portal events flow into FastAPI agents for baseline, anomaly, attribution, orchestration, CVE, graph, audit, and evaluation.</desc>
+  <rect width="1080" height="520" fill="#f8fafc"/>
+  <rect x="40" y="52" width="300" height="392" rx="8" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="60" y="88" font-family="Arial" font-size="20" font-weight="700" fill="#0f172a">frontend/ Pariksha Kendra</text>
+  <g font-family="Arial" font-size="14" fill="#0f172a">
+    <rect x="70" y="122" width="220" height="42" rx="6" fill="#e0f2fe" stroke="#0284c7"/><text x="92" y="148">Candidate Portal</text>
+    <rect x="70" y="180" width="220" height="42" rx="6" fill="#e0f2fe" stroke="#0284c7"/><text x="92" y="206">Invigilator Portal</text>
+    <rect x="70" y="238" width="220" height="42" rx="6" fill="#e0f2fe" stroke="#0284c7"/><text x="92" y="264">Examiner Portal</text>
+    <rect x="70" y="296" width="220" height="42" rx="6" fill="#e0f2fe" stroke="#0284c7"/><text x="92" y="322">Certificate Verification</text>
+    <rect x="70" y="354" width="220" height="42" rx="6" fill="#dcfce7" stroke="#16a34a"/><text x="92" y="380">Security SOC UI</text>
+  </g>
+  <rect x="450" y="52" width="580" height="392" rx="8" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="470" y="88" font-family="Arial" font-size="20" font-weight="700" fill="#0f172a">backend/ FastAPI + agents</text>
+  <g font-family="Arial" font-size="13" fill="#0f172a">
+    <rect x="485" y="122" width="170" height="42" rx="6" fill="#f1f5f9" stroke="#64748b"/><text x="510" y="148">/ingest/events</text>
+    <rect x="695" y="122" width="260" height="42" rx="6" fill="#f1f5f9" stroke="#64748b"/><text x="720" y="148">baseline_agent</text>
+    <rect x="695" y="180" width="260" height="42" rx="6" fill="#fef9c3" stroke="#ca8a04"/><text x="720" y="206">anomaly_agent: IsolationForest + z-score</text>
+    <rect x="695" y="238" width="260" height="42" rx="6" fill="#ede9fe" stroke="#7c3aed"/><text x="720" y="264">attribution_agent: ATT&amp;CK RAG</text>
+    <rect x="695" y="296" width="260" height="42" rx="6" fill="#fee2e2" stroke="#dc2626"/><text x="720" y="322">orchestrator_agent + approval gate</text>
+    <rect x="485" y="238" width="170" height="42" rx="6" fill="#ecfccb" stroke="#65a30d"/><text x="510" y="264">cve_agent</text>
+    <rect x="485" y="296" width="170" height="42" rx="6" fill="#ecfccb" stroke="#65a30d"/><text x="510" y="322">graph_agent</text>
+    <rect x="485" y="354" width="170" height="42" rx="6" fill="#f1f5f9" stroke="#64748b"/><text x="510" y="380">eval/report</text>
+    <rect x="695" y="354" width="260" height="42" rx="6" fill="#f1f5f9" stroke="#64748b"/><text x="720" y="380">hash-chained audit log</text>
+  </g>
+  <g stroke="#334155" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <path d="M290 202 C360 202 390 143 485 143"/>
+    <path d="M655 143 L695 143"/>
+    <path d="M825 164 L825 180"/>
+    <path d="M825 222 L825 238"/>
+    <path d="M825 280 L825 296"/>
+    <path d="M695 259 L655 259"/>
+    <path d="M695 317 L655 317"/>
+    <path d="M825 338 L825 354"/>
+    <path d="M290 375 C370 375 400 375 485 375"/>
+  </g>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker></defs>
+</svg>
+

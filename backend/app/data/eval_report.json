@@ -1,0 +1,54 @@
+{
+  "generated_at": "2026-07-20T16:53:32.514933+00:00",
+  "dataset_rows": 1189,
+  "labelled_attack_rows": 108,
+  "alert_count": 235,
+  "threshold": 0.52,
+  "detection_rate": 0.8056,
+  "false_positive_rate": 0.1369,
+  "attack_technique_accuracy": 1.0,
+  "mttd_minutes": 1.0,
+  "manual_mttd_minutes": 10080,
+  "mttd_improvement": 10080.0,
+  "mttr_minutes": 42.0,
+  "manual_mttr_minutes": 2880,
+  "mttr_improvement": 68.6,
+  "autonomous_playbook_percent": 75.0,
+  "observed_techniques": [
+    "T1005",
+    "T1021",
+    "T1041",
+    "T1056",
+    "T1056.003",
+    "T1078",
+    "T1110",
+    "T1499",
+    "T1547.015",
+    "T1685.003"
+  ],
+  "baseline": {
+    "segments": {
+      "proctoring": {
+        "count": 356,
+        "avg_latency_ms": 130.8938764044944,
+        "avg_bytes_out": 43.533202247191014,
+        "success_rate": 0.9747191011235955
+      },
+      "candidate-portal": {
+        "count": 344,
+        "avg_latency_ms": 127.54232558139535,
+        "avg_bytes_out": 46.483197674418605,
+        "success_rate": 0.9505813953488372
+      },
+      "marking": {
+        "count": 381,
+        "avg_latency_ms": 134.23112860892388,
+        "avg_bytes_out": 46.37417322834646,
+        "success_rate": 0.973753280839895
+      }
+    },
+    "training_rows": 1081
+  },
+  "mitre_technique_count": 697,
+  "chroma_ready": true
+}

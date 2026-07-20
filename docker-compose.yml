@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis
+      POSTGRES_DB: aegis
+    ports:
+      - "5432:5432"
+    volumes:
+      - aegis-postgres:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    environment:
+      AEGIS_ENV: production
+      AEGIS_DATABASE_URL: postgresql+psycopg://aegis:aegis@postgres:5432/aegis
+      AEGIS_API_KEY: change-me-long-random-secret
+      AEGIS_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080
+      AEGIS_INGEST_RATE_LIMIT_PER_MINUTE: 6000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  aegis-postgres:
+

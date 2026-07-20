@@ -1,0 +1,185 @@
+ROLE: You are a Staff Frontend Engineer building a high-stakes national examination
+delivery platform from scratch. Before touching any screen, internalize the
+governing fact that shapes every decision below:
+
+  Unlike a typical outage, a failure on this platform at exam-day or results-day
+  is a fairness harm to potentially millions of people simultaneously, not a
+  business inconvenience. The candidate-facing experience must stay calm under
+  pressure even when the underlying system is under real load or attack. The
+  examiner-facing experience must be visually and behaviorally distinct from the
+  candidate experience, since examiner-side compromise is historically the more
+  under-secured surface in comparable real systems.
+
+You will both reason through design and build in this same pass. Where this brief
+is silent on a judgment call, make a reasonable decision and state it in a one-line
+code comment rather than defaulting silently.
+
+═══════════════════════════════════════════
+PART 1 — SCOPE AND HARD CONSTRAINTS
+═══════════════════════════════════════════
+App name: "Pariksha Kendra." Roles: Candidate, Invigilator/Proctor, Examiner
+(on-screen marker). Plus one unauthenticated public path: certificate verification.
+
+Non-negotiable, critical-defect-if-violated:
+1. AI-flagged anomalies (ProctorDashboard) must always render as neutral,
+   non-verdict language ("Flagged for Review") — never red, never accusatory,
+   never an auto-disqualification action anywhere in the UI.
+2. The examiner (OSM) interface must be visually and structurally distinct from
+   every candidate-facing screen — different header treatment, explicit session
+   banner, no shared login path with candidates.
+3. Results release is per-candidate staggered ("your result at your specific
+   time slot"), never a single shared countdown to one mass-release moment for
+   everyone — this is a deliberate correction of a known real-world failure
+   pattern, not a style choice.
+4. Certificate verification (public path) never requires login and never exposes
+   more than status/name/exam — no route to any other candidate's full record.
+5. Red is reserved for exactly three things across the entire app: the exam
+   timer, the invalid-certificate state, and true system warnings — never used
+   decoratively or for ordinary UI emphasis.
+
+═══════════════════════════════════════════
+PART 2 — VISUAL SYSTEM
+═══════════════════════════════════════════
+Tokens (`src/styles/theme.css`) — use exactly these, introduce zero new colors:
+- `--background: #EEF0F4`, `--foreground: #0F1C2E`
+- `--card: #FFFFFF`, `--card-foreground: #0F1C2E`
+- `--primary: #0D2B5E` (authority navy), `--primary-foreground: #FFFFFF`
+- `--secondary: #D4D9E2`, `--secondary-foreground: #0F1C2E`
+- `--muted: #E4E7ED`, `--muted-foreground: #5B6478`
+- `--accent: #C8102E` (the one red — timer, invalid-certificate, true warnings only)
+- `--border: rgba(15,28,46,0.12)`, `--ring: #0D2B5E`, `--radius: 0.25rem`
+- Examiner-only header: `#071729` (near-black navy) — approved exception for
+  Screen 5 only, to make the secured session visually unmistakable
+
+Fonts: `Noto Serif` 600/700 (display headings, certificate elements), `Inter`
+400/500/600 (body, UI labels), `JetBrains Mono` 400/500 (codes, timestamps, IDs,
+certificate IDs, session identifiers).
+
+CRAFT STANDARDS — build these in from the first component, not as a later pass:
+- Typographic rhythm: metadata/labels (roll numbers, timestamps, status chips)
+  in JetBrains Mono at 11-13px with deliberate tracking; question/content text
+  in Inter at 15-16px — a clear, consistent size hierarchy, not uniform defaults.
+- Two-tier border system: subtler weight for structural grouping, more present
+  weight for interactive/focusable elements — using only `--border` at different
+  opacity steps, never a new color or a shadow/gradient (this app has a strict,
+  institutional, non-decorative visual language).
+- Every interactive element (radio card, button, input, palette tile) needs
+  explicit hover, focus-visible, active, and disabled states built from existing
+  tokens — critical here specifically because ExamInterface must be fully
+  operable by keyboard alone (accessibility requirement, not optional).
+- Density must match role context: ExamInterface should feel calm and
+  uncluttered even while dense with information (many questions, limited time);
+  ProctorDashboard should feel scannable at a glance across many candidate
+  tiles; ResultsPortal should feel unhurried and reassuring, not transactional.
+- The countdown timer and the connection-status dot are the two places where
+  restraint matters most — the timer should read as serious, not alarming
+  (no flashing, no aggressive animation) until the specific low-time warning
+  threshold; the connection dot should never use red, only green/amber.
+
+═══════════════════════════════════════════
+PART 3 — LOGIN (new entry point, role-gated)
+═══════════════════════════════════════════
+Risk purpose: enforce that each person only ever reaches the one interface their
+credential entitles them to — candidates must never see an examiner or proctor
+route, and vice versa.
+
+- Institutional login form: ID/roll number or staff ID, password. No self-service
+  "forgot password" for Invigilator/Examiner roles (institutional credential
+  management only, matching the report's security posture); candidates may have
+  a standard reset flow since candidate accounts are lower-assurance than staff.
+- Route on login: Candidate → CandidateRegistration/ExamInterface/ResultsPortal
+  flow (candidate never sees Proctor or Examiner screens); Invigilator →
+  ProctorDashboard only; Examiner → ExaminerOSM only, entering through the
+  distinct dark-navy secured header immediately, no intermediate generic screen.
+- CertificateVerification's "Verify a Certificate" path remains reachable without
+  login from the public landing area, separate from this authenticated flow.
+- Add a code comment: "PRODUCTION NOTE: role separation is enforced here at the
+  frontend router for demo purposes only; a production backend must independently
+  reject any request outside the authenticated user's permitted scope."
+
+═══════════════════════════════════════════
+PART 4 — SCREENS (risk purpose first, one line, then build)
+═══════════════════════════════════════════
+
+1. CandidateRegistration — Risk: establish real identity assurance before any
+   exam-day trust is extended. 5-step flow (Identity → Documents → Biometric →
+   Accessibility → Review), DPDPA 2023 trust note near sensitive fields,
+   accommodation/accessibility request treated as first-class, not an afterthought.
+
+2. HallTicket — Risk: tamper-evident credential the candidate and center can both
+   trust. Print-optimized card, photo + details grid, QR placeholder, "Tamper-
+   Evident Verified" badge, watermark. This QR/badge component is reused verbatim
+   in CertificateVerification later — build it once, reference it twice.
+
+3. ExamInterface — Risk: the single highest-consequence screen in the app; a
+   state bug here can invalidate a candidate's exam. Full-viewport, no external
+   nav. Header: exam/candidate name, section selector, connection dot
+   (green/amber only), countdown timer (red monospace, calm until low-time
+   threshold). Question palette color-coded: answered/unanswered/marked/
+   not-visited. Footer: Save & Next, Mark for Review, Clear Response, Previous.
+   RESOLVED: a question CAN be simultaneously answered and marked for review
+   (matches real exam-board convention — marking is a review flag, not a
+   mutually exclusive state with having answered). Timer expiry triggers
+   automatic submission; the last few seconds before expiry show a calm,
+   non-flashing state change, and the transition to "submitted" is immediate
+   with no ambiguous in-between state. Full keyboard navigation required:
+   arrow keys move between options, Tab moves through palette/footer controls
+   in a logical, testable order.
+
+4. ProctorDashboard — Risk: surface anomalies for human judgment, never render
+   a verdict. Candidate tile grid, neutral grey "Flagged for Review" badges only.
+   Click → slide-over panel: anomaly timeline, evidence, "Dismiss Flag" /
+   "Escalate to Integrity Board" — no auto-action button exists anywhere.
+
+5. ExaminerOSM — Risk: this is a distinct, more-secured environment, not a
+   themed variant of the candidate UI. Near-black navy header (`#071729`),
+   explicit "EXAMINER SESSION — [name] — Session #[ID] — [live timestamp]"
+   banner with lock icon. Split screen: scanned script (55%) / marking panel
+   (45%). Candidate identity hidden from examiner — only script ID shown
+   (blind marking). Session activity log at bottom of marking panel.
+
+6. ResultsPortal — Risk: correct a known real-world mass-concurrency failure
+   pattern. Two tabs: "My Result" (personal time-slot message + personal
+   countdown, never a shared mass-release countdown; reveal state shows
+   subject-wise marks, percentile, rank) and "Re-evaluation Requests"
+   (submission form + 4-state tracker: Submitted → Under Review → Decision
+   Pending → Resolved, full timestamped audit trail).
+
+7. CertificateVerification — Risk: give third parties (employers, institutions)
+   a way to verify without ever exposing more than necessary, and without
+   requiring login. Candidate view (own certificate, reusing HallTicket's
+   header/QR/badge components) and a public "Verify a Certificate" tab
+   (no login, single ID/QR input). Include 2-3 working hardcoded sample
+   certificate IDs so a reviewer can type a real ID and see the actual success
+   path. Valid ID → green "Verified — Authentic" banner; invalid ID → the
+   red-bordered "not found" state (one of the app's three sanctioned uses of
+   `--accent`).
+
+═══════════════════════════════════════════
+PART 5 — SHARED ACCESSIBILITY TOOLKIT (all authenticated screens)
+═══════════════════════════════════════════
+Fixed header segment, always visible, never inside a collapsed menu: font size
+(A−/A+ via a `--base-font-scale` custom property), high-contrast toggle (swaps
+only existing navy/white tokens, no new colors), screen-reader indicator icon,
+extended-time indicator (visible only when `activeScreen === 'ExamInterface'`,
+conditionally rendered).
+
+═══════════════════════════════════════════
+PART 6 — CROSS-CUTTING STATE ARCHITECTURE
+═══════════════════════════════════════════
+Define an `AuthSession` type (userId, role: 'candidate' | 'invigilator' |
+'examiner', sessionId) and a `useAuth` hook backing the login screen. Define the
+three exam-state tracking structures (answered, marked, visited) as precise data
+structures sized for hundreds of questions without re-render thrashing — justify
+Map vs Set choice in a one-line comment. Shared `<Header>` component identical
+across screens except ExaminerOSM's distinct dark treatment and the login-gated
+role restriction on which nav items even render.
+
+═══════════════════════════════════════════
+PART 7 — BUILD NOW
+═══════════════════════════════════════════
+Generate `fonts.css`, `theme.css`, and `App.tsx` (all seven screens plus
+LoginScreen as named components, shared Header, `AuthSession` state, all logic
+in hooks) in this same pass. Where you make a judgment call not explicitly
+specified above, state it in a one-line code comment rather than defaulting
+silently.

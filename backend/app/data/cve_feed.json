@@ -1,0 +1,45 @@
+[
+  {
+    "cve": "CVE-2026-EXAM-0001",
+    "asset_id": "auth-db",
+    "cvss": 9.4,
+    "exploitability": 0.92,
+    "summary": "Weak session invalidation path in legacy auth middleware.",
+    "related_techniques": [
+      "T1078",
+      "T1110"
+    ]
+  },
+  {
+    "cve": "CVE-2026-EXAM-0002",
+    "asset_id": "certificate-service",
+    "cvss": 8.1,
+    "exploitability": 0.88,
+    "summary": "Certificate lookup endpoint lacks adaptive throttling.",
+    "related_techniques": [
+      "T1499"
+    ]
+  },
+  {
+    "cve": "CVE-2026-EXAM-0003",
+    "asset_id": "marking",
+    "cvss": 8.8,
+    "exploitability": 0.78,
+    "summary": "Marking portal file export can over-share script bundles.",
+    "related_techniques": [
+      "T1041",
+      "T1005"
+    ]
+  },
+  {
+    "cve": "CVE-2026-EXAM-0004",
+    "asset_id": "proctoring",
+    "cvss": 7.2,
+    "exploitability": 0.64,
+    "summary": "Stale proctor device trust token permits lateral portal access.",
+    "related_techniques": [
+      "T1021",
+      "T1078"
+    ]
+  }
+]
