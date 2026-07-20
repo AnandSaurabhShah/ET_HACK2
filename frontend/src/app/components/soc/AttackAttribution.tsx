@@ -9,6 +9,8 @@ export function AttackAttribution({ alert }: { alert?: SocAlert }) {
       </section>
     );
   }
+  const modelScores = alert.event.metadata?.model_scores as Record<string, number> | undefined;
+  const prediction = alert.event.metadata?.prediction as { reasons?: string[]; predicted_next_stage?: string } | undefined;
   return (
     <section className="rounded-sm border border-border/70 bg-card p-4">
       <h2 className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-foreground">
@@ -53,8 +55,22 @@ export function AttackAttribution({ alert }: { alert?: SocAlert }) {
         <p className="mt-1">
           <span className="font-semibold">Recommendation:</span> {alert.attribution.recommendation}
         </p>
+        {modelScores && (
+          <p className="mt-1">
+            <span className="font-semibold">AI risk:</span> anomaly {Math.round((modelScores.anomaly_score ?? 0) * 100)}%, predictive{" "}
+            {Math.round((modelScores.predictive_risk_score ?? 0) * 100)}%
+          </p>
+        )}
+        {prediction?.reasons?.length ? (
+          <ul className="mt-2 grid gap-1">
+            {prediction.reasons.slice(0, 4).map((reason) => (
+              <li key={reason} className="text-muted-foreground">
+                {reason}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </section>
   );
 }
-

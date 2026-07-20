@@ -53,7 +53,9 @@ One-command Windows demo:
 - Frontend auth and public certificate verification events post to `/ingest/events`.
 - FastAPI backend with stable endpoints for alerts, SSE, attribution, playbooks, CVE queue, digital twin, audit, and eval report.
 - Behavioural anomaly engine using IsolationForest plus z-score deviation against normal baselines.
+- Predictive risk engine using gradient-boosted attack probability, rare transition modelling, and entity pressure features.
 - Local ATT&CK corpus built from MITRE Enterprise ATT&CK STIX JSON, distilled to non-deprecated attack techniques and mitigation relationships.
+- GenAI attribution boundary for defensive evidence synthesis, likely next-stage prediction, and recommendations, with deterministic offline fallback.
 - ChromaDB persistence path for the ATT&CK corpus, with deterministic TF-IDF retrieval fallback for offline demos.
 - Hash-chained append-only audit log for every automated action.
 - `RESULTS.md` generated from the eval harness, not hand-entered metrics.
@@ -68,6 +70,7 @@ Real:
 - ATT&CK technique records and mitigations are distilled from MITRE Enterprise ATT&CK STIX data.
 - Playbook execution writes hash-chained audit entries and high-blast-radius steps require approval.
 - `/eval/report` and `RESULTS.md` are generated from `app/eval/harness.py`.
+- Predictive scoring uses learned behavioural patterns and sequence rarity; it does not merely search for a known attack name in a database.
 
 SIMULATED/MOCKED:
 
@@ -97,6 +100,8 @@ SIMULATED/MOCKED:
 - `POST /demo/resume`
 
 Live request-layer detection is documented in [TESTING.md](./TESTING.md). It includes curl/PowerShell checks for SQL injection-shaped payloads, command injection-shaped payloads, path traversal, XSS, scanner User-Agents as supporting signals, endpoint enumeration, brute force, HTTP 403 block enforcement, and audit verification.
+
+Production deployment boundaries and required enterprise integrations are documented in [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md).
 
 ## MITRE Coverage
 

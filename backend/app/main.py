@@ -5,6 +5,7 @@ import base64
 import json
 import random
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from app.agents.attribution_agent import AttributionAgent
 from app.agents.cve_agent import CveAgent
 from app.agents.graph_agent import GraphAgent
 from app.agents.orchestrator_agent import OrchestratorAgent
+from app.agents.predictive_risk_agent import PredictiveRiskAgent, RiskPrediction
 from app.audit.audit_log import AuditLog
 from app.config import get_settings
 from app.db import db_health, init_db, sync_alerts, sync_events, upsert_alert, upsert_event
@@ -44,6 +46,7 @@ app.add_middleware(
 audit = AuditLog()
 anomaly_agent = AnomalyAgent()
 attribution_agent = AttributionAgent()
+risk_agent = PredictiveRiskAgent(threshold=settings.predictive_risk_threshold)
 orchestrator_agent = OrchestratorAgent(audit=audit, blast_threshold=settings.high_blast_radius_threshold)
 cve_agent = CveAgent()
 graph_agent = GraphAgent()
@@ -320,6 +323,7 @@ async def startup() -> None:
     global EVENTS, ALERTS, DEMO_TASK, DEMO_NORMAL_POOL
     EVENTS = _load_events()
     anomaly_agent.fit(EVENTS)
+    risk_agent.fit(EVENTS)
     ALERTS = _load_alerts()
     if not ALERTS:
         ALERTS = build_alerts(EVENTS, anomaly_agent, attribution_agent)
@@ -356,6 +360,13 @@ def ready() -> dict:
         "ok": True,
         "database": db_health(),
         "anomaly_model_fit": anomaly_agent._fit,
+        "predictive_risk_model_fit": risk_agent._fit,
+        "predictive_risk_threshold": settings.predictive_risk_threshold,
+        "genai_attribution": {
+            "provider": settings.genai_provider,
+            "configured": attribution_agent.genai.available(),
+            "model": settings.genai_model if attribution_agent.genai.available() else "offline-fallback",
+        },
         "mitre_techniques": len(attribution_agent.retriever.techniques),
         "demo_traffic": demo_status(),
         "blocked_ips": GLOBAL_BLOCKLIST.snapshot(),
@@ -373,33 +384,53 @@ def process_event(raw: RawEvent) -> dict:
 
 
 def process_telemetry_event(event: TelemetryEvent) -> dict:
+    history = EVENTS[-500:]
+    score = anomaly_agent.score(event)
+    risk_prediction = (
+        risk_agent.predict(event, history)
+        if risk_agent._fit
+        else RiskPrediction(score=0.0, attack_probability=0.0, sequence_surprise=0.0, entity_pressure=0.0, confidence=0.0)
+    )
+    risk_payload = asdict(risk_prediction)
+    decision_score = max(score, risk_prediction.score)
+    event.metadata = {
+        **event.metadata,
+        "model_scores": {
+            "anomaly_score": round(score, 3),
+            "predictive_risk_score": risk_prediction.score,
+            "decision_score": round(decision_score, 3),
+        },
+        "prediction": risk_payload,
+    }
     EVENTS.append(event)
     append_jsonl(EVENTS_PATH, event.model_dump())
     upsert_event(event.model_dump())
-    score = anomaly_agent.score(event)
     audit.append(
         actor="ingest_pipeline",
         action="score_event",
-        justification=f"Telemetry event {event.event_id} scored through the shared anomaly pipeline.",
+        justification=f"Telemetry event {event.event_id} scored through anomaly and predictive-risk pipelines.",
         blast_radius=0,
         payload={
             "event_id": event.event_id,
             "score": round(score, 3),
+            "predictive_risk_score": risk_prediction.score,
+            "decision_score": round(decision_score, 3),
             "label": event.label,
             "source": event.metadata.get("source"),
+            "risk_reasons": risk_prediction.reasons,
         },
     )
     alert_id = None
-    if score >= anomaly_agent.threshold:
+    if score >= anomaly_agent.threshold or risk_prediction.score >= risk_agent.threshold:
         alert_id = f"ALT-{len(ALERTS) + 1:05d}"
-        attribution = attribution_agent.attribute(alert_id, event, score)
+        attribution = attribution_agent.attribute(alert_id, event, decision_score, risk=risk_payload)
         ALERTS.insert(
             0,
             Alert(
                 alert_id=alert_id,
                 event=event,
-                anomaly_score=round(score, 3),
-                severity=severity_for(score),
+                anomaly_score=round(decision_score, 3),
+                severity=severity_for(decision_score),
                 title=f"{attribution.techniques[0].id} {attribution.techniques[0].name} on {event.segment}",
                 attribution=attribution,
                 created_at=utc_now(),
@@ -410,11 +441,20 @@ def process_telemetry_event(event: TelemetryEvent) -> dict:
         audit.append(
             actor="anomaly_agent",
             action="raise_alert",
-            justification=f"Frontend event exceeded behavioural anomaly threshold ({score:.2f}).",
+            justification=(
+                "Event exceeded behavioural decision threshold "
+                f"(anomaly={score:.2f}, predictive_risk={risk_prediction.score:.2f})."
+            ),
             blast_radius=1,
             payload={"event_id": event.event_id, "alert_id": alert_id},
         )
-    return {"accepted": True, "score": round(score, 3), "alert_id": alert_id}
+    return {
+        "accepted": True,
+        "score": round(score, 3),
+        "predictive_risk_score": risk_prediction.score,
+        "decision_score": round(decision_score, 3),
+        "alert_id": alert_id,
+    }
 
 
 def run_orchestrator_for_alert(alert_id: str, actor: str) -> None:

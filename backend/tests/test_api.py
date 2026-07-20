@@ -13,6 +13,8 @@ def test_health_and_eval_report() -> None:
         ready = client.get("/ready")
         assert ready.status_code == 200
         assert ready.json()["database"]["ok"] is True
+        assert ready.json()["predictive_risk_model_fit"] is True
+        assert "genai_attribution" in ready.json()
 
         report = client.get("/eval/report")
         assert report.status_code == 200
@@ -71,6 +73,12 @@ def test_perimeter_signature_blocks_follow_up_request() -> None:
         audit = client.get("/audit/verify")
         assert audit.status_code == 200
         assert audit.json()["ok"] is True
+
+        alerts = client.get("/alerts?source=live_traffic&limit=1")
+        assert alerts.status_code == 200
+        alert = alerts.json()["items"][0]
+        assert "model_scores" in alert["event"]["metadata"]
+        assert "prediction" in alert["event"]["metadata"]
 
 
 def test_scanner_user_agent_alone_is_supporting_signal_only() -> None:
