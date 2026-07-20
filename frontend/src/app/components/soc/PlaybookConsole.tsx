@@ -29,9 +29,14 @@ export function PlaybookConsole({ runs, onApprove }: Props) {
             </div>
             <div className="mt-3 grid gap-2">
               {run.steps.map((step) => (
-                <div key={`${run.run_id}-${step.action}`} className="flex items-center justify-between gap-2 rounded-sm bg-muted px-2 py-1 text-[12px]">
-                  <span className="text-foreground">{step.name}</span>
-                  <span className="font-mono text-muted-foreground">BR {step.blast_radius} · {step.status}</span>
+                <div key={`${run.run_id}-${step.action}`} className="rounded-sm bg-muted px-2 py-1 text-[12px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-foreground">{step.name}</span>
+                    <span className="font-mono text-muted-foreground">
+                      BR {step.blast_radius} · {step.status} · {step.verified ? "verified" : "unverified"}
+                    </span>
+                  </div>
+                  {step.details && <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{step.details}</p>}
                 </div>
               ))}
             </div>
@@ -42,4 +47,3 @@ export function PlaybookConsole({ runs, onApprove }: Props) {
     </section>
   );
 }
-

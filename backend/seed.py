@@ -4,9 +4,10 @@ from app.agents.anomaly_agent import AnomalyAgent
 from app.agents.attribution_agent import AttributionAgent
 from app.agents.baseline_agent import BaselineAgent
 from app.audit.audit_log import AuditLog
-from app.db import init_db, sync_alerts, sync_events
+from app.db import init_db, reset_demo_tables, sync_alerts, sync_events
 from app.eval.harness import build_alerts, evaluate
 from app.ingest.synth_generator import generate_events
+from app.ingest.nvd_client import FALLBACK_CVES, refresh_nvd_cache
 from app.paths import (
     ALERTS_PATH,
     ASSET_INVENTORY_PATH,
@@ -30,15 +31,9 @@ def seed_static_feeds() -> None:
         {"asset_id": "certificate-service", "name": "Certificate Verification Service", "criticality": 4, "owner": "Public Trust"},
         {"asset_id": "auth-db", "name": "Auth DB", "criticality": 5, "owner": "Identity"},
     ]
-    # SIMULATED/MOCKED: synthetic CVEs model risk prioritisation without live CVE calls.
-    cves = [
-        {"cve": "CVE-2026-EXAM-0001", "asset_id": "auth-db", "cvss": 9.4, "exploitability": 0.92, "summary": "Weak session invalidation path in legacy auth middleware.", "related_techniques": ["T1078", "T1110"]},
-        {"cve": "CVE-2026-EXAM-0002", "asset_id": "certificate-service", "cvss": 8.1, "exploitability": 0.88, "summary": "Certificate lookup endpoint lacks adaptive throttling.", "related_techniques": ["T1499"]},
-        {"cve": "CVE-2026-EXAM-0003", "asset_id": "marking", "cvss": 8.8, "exploitability": 0.78, "summary": "Marking portal file export can over-share script bundles.", "related_techniques": ["T1041", "T1005"]},
-        {"cve": "CVE-2026-EXAM-0004", "asset_id": "proctoring", "cvss": 7.2, "exploitability": 0.64, "summary": "Stale proctor device trust token permits lateral portal access.", "related_techniques": ["T1021", "T1078"]},
-    ]
     write_json(ASSET_INVENTORY_PATH, assets)
-    write_json(CVE_FEED_PATH, cves)
+    write_json(CVE_FEED_PATH, FALLBACK_CVES)
+    refresh_nvd_cache(force=True)
 
 
 def write_results(report: dict) -> None:
@@ -72,6 +67,7 @@ Observed ATT&CK techniques: {', '.join(report['observed_techniques'])}
 def main() -> None:
     ensure_dirs()
     init_db()
+    reset_demo_tables()
     if AUDIT_LOG_PATH.exists():
         AUDIT_LOG_PATH.unlink()
     techniques = build_mitre_corpus()

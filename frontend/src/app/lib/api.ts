@@ -71,7 +71,7 @@ export interface PlaybookRun {
   status: "executed" | "queued_for_approval" | "approved";
   autonomous_percent: number;
   justification: string;
-  steps: { name: string; action: string; blast_radius: number; status: string }[];
+  steps: { name: string; action: string; blast_radius: number; status: string; verified?: boolean; details?: string }[];
 }
 
 export interface AuditEntry {
@@ -106,6 +106,8 @@ export const api = {
   cves: () => request<ApiList<any>>("/cve-queue"),
   graph: () => request<any>("/twin/graph"),
   simulateTwin: () => request<any>("/twin/simulate", { method: "POST" }),
+  simulateAttack: (techniqueId = "T1110", count = 8) =>
+    request<any>(`/simulate/attack/${techniqueId}?count=${count}`, { method: "POST" }),
   runPlaybook: (alertId: string) => request<PlaybookRun>(`/playbooks/${alertId}/run`, { method: "POST" }),
   approvePlaybook: (runId: string) => request<PlaybookRun>(`/playbooks/${runId}/approve`, { method: "POST" }),
   ingestEvent: (body: Record<string, unknown>) =>

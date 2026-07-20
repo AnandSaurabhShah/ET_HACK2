@@ -14,6 +14,7 @@ export function CveQueue({ items }: { items: any[] }) {
               <th className="py-2 font-medium">Asset</th>
               <th className="py-2 font-medium">Risk</th>
               <th className="py-2 font-medium">TTP</th>
+              <th className="py-2 font-medium">Source</th>
             </tr>
           </thead>
           <tbody>
@@ -23,6 +24,11 @@ export function CveQueue({ items }: { items: any[] }) {
                 <td className="py-2 text-foreground">{item.asset?.name ?? item.asset_id}</td>
                 <td className="py-2 font-mono text-foreground">{item.risk_score}</td>
                 <td className="py-2 font-mono text-muted-foreground">{item.related_techniques?.join(", ")}</td>
+                <td className="py-2">
+                  <span className="rounded-sm bg-muted px-2 py-1 font-mono text-[11px] text-foreground">
+                    {item.source ?? "cached"}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -31,4 +37,3 @@ export function CveQueue({ items }: { items: any[] }) {
     </section>
   );
 }
-

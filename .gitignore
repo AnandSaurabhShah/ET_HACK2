@@ -1,5 +1,7 @@
 frontend/node_modules/
 frontend/dist/
+frontend/.env
+backend/.env
 frontend/frontend-vite.log
 frontend/frontend-vite.err.log
 backend/backend-uvicorn.log
@@ -8,4 +10,5 @@ backend/**/__pycache__/
 backend/app/rag/chroma/
 backend/app/data/*.db
 backend/app/data/*.db-*
+backend/app/data/soar_sandbox/
 .pytest_cache/

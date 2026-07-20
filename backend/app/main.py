@@ -17,6 +17,8 @@ from app.config import get_settings
 from app.db import db_health, init_db, sync_alerts, sync_events, upsert_alert, upsert_event
 from app.eval.harness import build_alerts, severity_for
 from app.ingest.exam_app_adapter import normalize_frontend_event
+from app.ingest.attack_simulation import build_attack_event, find_technique
+from app.ingest.nvd_client import refresh_nvd_cache
 from app.ingest.synth_generator import generate_events
 from app.models.schemas import Alert, RawEvent, TelemetryEvent
 from app.paths import ALERTS_PATH, EVAL_REPORT_PATH, EVENTS_PATH, ensure_dirs
@@ -69,6 +71,7 @@ def startup() -> None:
     if not ALERTS:
         ALERTS = build_alerts(EVENTS, anomaly_agent, attribution_agent)
         write_json(ALERTS_PATH, [a.model_dump() for a in ALERTS])
+    refresh_nvd_cache(force=False)
     sync_events([event.model_dump() for event in EVENTS])
     sync_alerts([alert.model_dump() for alert in ALERTS])
 
@@ -90,6 +93,10 @@ def ready() -> dict:
 
 @app.post("/ingest/events", status_code=202)
 def ingest_event(raw: RawEvent, request: Request, _: None = Depends(check_ingest_rate_limit)) -> dict:
+    return process_event(raw)
+
+
+def process_event(raw: RawEvent) -> dict:
     event = normalize_frontend_event(raw)
     EVENTS.append(event)
     append_jsonl(EVENTS_PATH, event.model_dump())
@@ -121,6 +128,26 @@ def ingest_event(raw: RawEvent, request: Request, _: None = Depends(check_ingest
             payload={"event_id": event.event_id, "alert_id": alert_id},
         )
     return {"accepted": True, "score": round(score, 3), "alert_id": alert_id}
+
+
+@app.post("/simulate/attack/{technique_id}", dependencies=[OperatorAuth])
+def simulate_attack(technique_id: str, count: int = Query(8, ge=1, le=30)) -> dict:
+    try:
+        technique = find_technique(technique_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Technique not found in local ATT&CK corpus")
+    results = []
+    for idx in range(1, count + 1):
+        result = process_event(RawEvent.model_validate(build_attack_event(technique, idx, count)))
+        results.append(result)
+    audit.append(
+        actor="attack_simulator",
+        action="run_safe_attack_simulation",
+        justification=f"Operator triggered safe telemetry simulation for {technique['id']} {technique['name']}.",
+        blast_radius=0,
+        payload={"technique_id": technique["id"], "count": count, "alerts": [r.get("alert_id") for r in results if r.get("alert_id")]},
+    )
+    return {"technique": technique, "results": results}
 
 
 @app.get("/alerts")

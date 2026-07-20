@@ -41,6 +41,12 @@ INV-DEL-0097 / invigilator
 OSM-7731 / examiner
 ```
 
+One-command Windows demo:
+
+```powershell
+.\scripts\start_demo.ps1
+```
+
 ## What Is Built
 
 - Existing exam portal extended with a `security` role.
@@ -105,6 +111,19 @@ python tools/attack_simulator.py --technique T1110 --count 8
 ```
 
 This sends benign labelled events to `/ingest/events`, so the SOC can detect and audit the selected technique without attacking the machine.
+
+The SOC dashboard also includes a **Simulate T1110** button that triggers the same safe live flow through the backend.
+
+## Sandboxed Playbook Execution
+
+`orchestrator_agent.py` now executes playbook steps through `SandboxExecutor`:
+
+- `snapshot_state` writes verifiable local evidence.
+- `revoke_session:*` writes verifiable local revocation evidence.
+- `block_ip:*` creates/uses a throwaway Docker sandbox and adds a blackhole route when Docker is running.
+- `isolate_endpoint:*` disconnects the throwaway Docker endpoint from the sandbox network after human approval.
+
+If Docker is not running, those Docker-backed actions are marked `unverified` and a fallback evidence file is written. Start Docker Desktop before the demo if you want the `block_ip` and `isolate_endpoint` rows to show verified sandbox execution.
 
 ## Production Configuration
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Database, Gauge, History, Radar, ShieldCheck, TimerReset } from "lucide-react";
+import { Database, Gauge, History, Play, Radar, ShieldCheck, TimerReset } from "lucide-react";
 import { alertsEventSource, api, type AuditEntry, type PlaybookRun, type SocAlert, type SocMetricReport } from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
@@ -34,6 +34,7 @@ export function SocDashboard() {
   const [graph, setGraph] = useState<any>(null);
   const [simulation, setSimulation] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [simStatus, setSimStatus] = useState<string | null>(null);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
 
@@ -92,6 +93,14 @@ export function SocDashboard() {
     setAudit(auditRes.items);
   }
 
+  async function simulateBruteForce() {
+    setSimStatus("Running T1110...");
+    const response = await api.simulateAttack("T1110", 8);
+    const newAlerts = response.results.filter((item: any) => item.alert_id).map((item: any) => item.alert_id);
+    setSimStatus(`T1110 complete: ${newAlerts.length} alerts raised`);
+    await refresh();
+  }
+
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -107,7 +116,14 @@ export function SocDashboard() {
         <span className="rounded-sm border border-border/70 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
           API {api.base}
         </span>
+        <button
+          onClick={() => void simulateBruteForce()}
+          className="inline-flex items-center gap-2 rounded-sm bg-primary px-3 py-2 text-[12px] text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Play className="size-3.5" /> Simulate T1110
+        </button>
       </div>
+      {simStatus && <div className="mb-4 rounded-sm border border-border/70 bg-card p-3 font-mono text-[12px] text-foreground">{simStatus}</div>}
 
       {error && <div className="mb-4 rounded-sm border border-accent bg-accent/5 p-3 text-[13px] text-foreground">Backend unavailable: {error}</div>}
 
@@ -157,4 +173,3 @@ export function SocDashboard() {
     </main>
   );
 }
-

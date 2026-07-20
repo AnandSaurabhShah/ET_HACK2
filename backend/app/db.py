@@ -112,6 +112,15 @@ def insert_audit(payload: dict[str, Any]) -> None:
         exists = session.execute(select(AuditRecord).where(AuditRecord.entry_hash == payload["hash"])).scalar_one_or_none()
         if exists:
             return
+        index_exists = session.execute(select(AuditRecord).where(AuditRecord.audit_index == payload["index"])).scalar_one_or_none()
+        if index_exists:
+            index_exists.actor = payload["actor"]
+            index_exists.action = payload["action"]
+            index_exists.payload_json = _dump(payload)
+            index_exists.entry_hash = payload["hash"]
+            index_exists.previous_hash = payload["previous_hash"]
+            session.commit()
+            return
         session.add(
             AuditRecord(
                 audit_index=payload["index"],
@@ -142,3 +151,11 @@ def db_health() -> dict[str, Any]:
         alert_count = session.query(AlertRecord).count()
         audit_count = session.query(AuditRecord).count()
     return {"ok": True, "events": event_count, "alerts": alert_count, "audit_entries": audit_count}
+
+
+def reset_demo_tables() -> None:
+    with SessionLocal() as session:
+        session.query(AuditRecord).delete()
+        session.query(AlertRecord).delete()
+        session.query(EventRecord).delete()
+        session.commit()

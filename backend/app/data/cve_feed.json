@@ -1,14 +1,51 @@
 [
   {
-    "cve": "CVE-2026-EXAM-0001",
+    "cve": "CVE-2001-1379",
     "asset_id": "auth-db",
-    "cvss": 9.4,
-    "exploitability": 0.92,
-    "summary": "Weak session invalidation path in legacy auth middleware.",
+    "cvss": 7.5,
+    "exploitability": 0.75,
+    "summary": "The PostgreSQL authentication modules (1) mod_auth_pgsql 0.9.5, and (2) mod_auth_pgsql_sys 0.9.4, allow remote attackers to bypass authentication and execute arbitrary SQL via a SQL injection attack on the user name.",
     "related_techniques": [
       "T1078",
       "T1110"
-    ]
+    ],
+    "source": "nvd_live",
+    "severity": "UNKNOWN",
+    "published": "2001-08-29T04:00:00.000",
+    "lastModified": "2026-06-16T21:56:09.367",
+    "nvd_url": "https://nvd.nist.gov/vuln/detail/CVE-2001-1379"
+  },
+  {
+    "cve": "CVE-2003-0500",
+    "asset_id": "auth-db",
+    "cvss": 10.0,
+    "exploitability": 1.0,
+    "summary": "SQL injection vulnerability in the PostgreSQL authentication module (mod_sql_postgres) for ProFTPD before 1.2.9rc1 allows remote attackers to execute arbitrary SQL and gain privileges by bypassing authentication or stealing passwords via the USER name.",
+    "related_techniques": [
+      "T1078",
+      "T1110"
+    ],
+    "source": "nvd_live",
+    "severity": "UNKNOWN",
+    "published": "2003-08-07T04:00:00.000",
+    "lastModified": "2026-06-16T22:02:19.297",
+    "nvd_url": "https://nvd.nist.gov/vuln/detail/CVE-2003-0500"
+  },
+  {
+    "cve": "CVE-2003-0515",
+    "asset_id": "auth-db",
+    "cvss": 7.5,
+    "exploitability": 0.75,
+    "summary": "SQL injection vulnerabilities in the (1) PostgreSQL or (2) MySQL authentication modules for teapop 0.3.5 and earlier allow attackers to execute arbitrary SQL and possibly gain privileges.",
+    "related_techniques": [
+      "T1078",
+      "T1110"
+    ],
+    "source": "nvd_live",
+    "severity": "UNKNOWN",
+    "published": "2003-08-18T04:00:00.000",
+    "lastModified": "2026-06-16T22:02:20.970",
+    "nvd_url": "https://nvd.nist.gov/vuln/detail/CVE-2003-0515"
   },
   {
     "cve": "CVE-2026-EXAM-0002",
@@ -18,18 +55,24 @@
     "summary": "Certificate lookup endpoint lacks adaptive throttling.",
     "related_techniques": [
       "T1499"
-    ]
+    ],
+    "source": "static_fallback"
   },
   {
-    "cve": "CVE-2026-EXAM-0003",
+    "cve": "CVE-2026-53607",
     "asset_id": "marking",
-    "cvss": 8.8,
-    "exploitability": 0.78,
-    "summary": "Marking portal file export can over-share script bundles.",
+    "cvss": 3.7,
+    "exploitability": 0.37,
+    "summary": "ApostropheCMS is an open-source Node.js content management system. In versions up to and including 4.30.0, when `prettyUrls: true` is enabled on `@apostrophecms/file` (a documented SEO feature for serving uploaded files at clean URLs), the public pretty-URL ha",
     "related_techniques": [
       "T1041",
       "T1005"
-    ]
+    ],
+    "source": "nvd_live",
+    "severity": "LOW",
+    "published": "2026-06-12T21:16:24.247",
+    "lastModified": "2026-06-17T10:57:58.183",
+    "nvd_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-53607"
   },
   {
     "cve": "CVE-2026-EXAM-0004",
@@ -40,6 +83,7 @@
     "related_techniques": [
       "T1021",
       "T1078"
-    ]
+    ],
+    "source": "static_fallback"
   }
 ]

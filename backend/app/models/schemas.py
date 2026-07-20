@@ -68,6 +68,8 @@ class PlaybookStep(BaseModel):
     blast_radius: int
     executable: bool = True
     status: Literal["pending", "executed", "queued", "approved"] = "pending"
+    verified: bool = False
+    details: str | None = None
 
 
 class PlaybookRun(BaseModel):
@@ -89,4 +91,3 @@ class AuditEntry(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     previous_hash: str
     hash: str
-

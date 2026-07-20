@@ -10,6 +10,7 @@ This repository is no longer only a hackathon MVP. It now includes the first pro
 - Pytest API smoke tests.
 - `/ready` dependency readiness endpoint.
 - `/audit/verify` hash-chain integrity endpoint.
+- Sandboxed SOAR executor with Docker-backed `block_ip` and `isolate_endpoint` verification when Docker is available.
 
 ## Required Before Real Deployment
 
