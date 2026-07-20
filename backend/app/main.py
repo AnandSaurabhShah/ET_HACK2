@@ -59,6 +59,7 @@ DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
 DEMO_STATS = {"benign_events": 0, "attack_events": 0, "last_event": None, "last_alert_id": None}
 MIDDLEWARE_SKIP_PREFIXES = ("/alerts/stream",)
 LOCAL_SOC_READ_PREFIXES = ("/alerts", "/audit", "/ready", "/eval/report", "/cve-queue", "/twin/graph", "/demo/status")
+DENY_MESSAGE = "Aegis-CNI perimeter blocklist denied this request."
 
 
 def _load_events() -> list[TelemetryEvent]:
@@ -169,6 +170,9 @@ def _signal_to_event(
     status_code: int,
     latency_ms: float,
     response_size: int,
+    request_size: int,
+    header_size: int,
+    body_size: int,
     body_text: str,
     user_agent: str,
     user_id: str,
@@ -189,7 +193,7 @@ def _signal_to_event(
         ip=ip,
         event_type=event_type,
         success=False,
-        latency_ms=round(latency_ms, 2),
+        latency_ms=round(max(latency_ms, 0.01), 2),
         bytes_out=response_size,
         label="live_perimeter",
         attack_id="LIVE-TRAFFIC",
@@ -208,6 +212,9 @@ def _signal_to_event(
             "user_agent": user_agent,
             "query_params": dict(request.query_params),
             "body_excerpt": body_text[:1200],
+            "request_size": request_size,
+            "header_size": header_size,
+            "body_size": body_size,
             "response_size": response_size,
             "blocked": GLOBAL_BLOCKLIST.is_blocked(ip),
         },
@@ -244,6 +251,7 @@ def _should_block(signal: SignatureMatch | RateSignal) -> bool:
 
 @app.middleware("http")
 async def live_request_detection_middleware(request: Request, call_next):
+    start = time.perf_counter()
     path = request.url.path
     ip = client_ip(request)
     if GLOBAL_BLOCKLIST.is_blocked(ip) and not _allow_local_blocked_soc_read(request, ip, path):
@@ -254,7 +262,7 @@ async def live_request_detection_middleware(request: Request, call_next):
             blast_radius=0,
             payload={"ip": ip, "route": path, "method": request.method},
         )
-        return PlainTextResponse("Aegis-CNI perimeter blocklist denied this request.", status_code=403)
+        return PlainTextResponse(DENY_MESSAGE, status_code=403)
 
     if any(path.startswith(prefix) for prefix in MIDDLEWARE_SKIP_PREFIXES):
         return await call_next(request)
@@ -266,6 +274,7 @@ async def live_request_detection_middleware(request: Request, call_next):
     user_id, role = _extract_auth_context(request, body_text)
     failed_login, target_user_id = _failed_login_signal(path, body_text)
     header_size = _headers_size(request)
+    request_size = header_size + len(body) + len(str(request.url.query or ""))
     request_text = _captured_text(request, body_text)
     signature_matches = scan_request(request_text, user_agent, header_size, len(body))
     rate_result = GLOBAL_RATE_TRACKER.record_request(ip, path, failed_login, target_user_id)
@@ -275,7 +284,6 @@ async def live_request_detection_middleware(request: Request, call_next):
         signals.extend(signature_matches)
     signals.extend(rate_result["signals"])
 
-    start = time.perf_counter()
     pre_handler_block = next((signal for signal in signals if _should_block(signal)), None)
     if pre_handler_block:
         latency_ms = (time.perf_counter() - start) * 1000
@@ -286,7 +294,10 @@ async def live_request_detection_middleware(request: Request, call_next):
             path=path,
             status_code=403,
             latency_ms=latency_ms,
-            response_size=0,
+            response_size=len(DENY_MESSAGE.encode("utf-8")),
+            request_size=request_size,
+            header_size=header_size,
+            body_size=len(body),
             body_text=body_text,
             user_agent=user_agent,
             user_id=user_id,
@@ -298,7 +309,7 @@ async def live_request_detection_middleware(request: Request, call_next):
         _block_ip_once(ip, pre_handler_block, event.event_id)
         if result.get("alert_id"):
             run_orchestrator_for_alert(result["alert_id"], "perimeter_middleware")
-        return PlainTextResponse("Aegis-CNI perimeter blocklist denied this request.", status_code=403)
+        return PlainTextResponse(DENY_MESSAGE, status_code=403)
 
     response = await call_next(request)
     latency_ms = (time.perf_counter() - start) * 1000
@@ -312,6 +323,9 @@ async def live_request_detection_middleware(request: Request, call_next):
             status_code=response.status_code,
             latency_ms=latency_ms,
             response_size=response_size,
+            request_size=request_size,
+            header_size=header_size,
+            body_size=len(body),
             body_text=body_text,
             user_agent=user_agent,
             user_id=user_id,

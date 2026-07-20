@@ -23,6 +23,25 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
       : "Behavioural";
   }
 
+  function displayScore(alert: SocAlert) {
+    const scores = alert.event.metadata?.model_scores as Record<string, number> | undefined;
+    return Math.round((scores?.decision_score ?? alert.anomaly_score) * 100);
+  }
+
+  function displayLatency(ms: number) {
+    if (ms < 1) return `${ms.toFixed(2)}ms`;
+    if (ms < 10) return `${ms.toFixed(1)}ms`;
+    return `${Math.round(ms)}ms`;
+  }
+
+  function byteMetric(alert: SocAlert) {
+    if (layer(alert) !== "Perimeter") {
+      return { label: "Bytes", value: Math.round(alert.event.bytes_out) };
+    }
+    const requestSize = Number(alert.event.metadata?.request_size ?? alert.event.bytes_out ?? 0);
+    return { label: "Req bytes", value: Math.round(requestSize) };
+  }
+
   return (
     <section className="min-h-[420px] border-r border-border/70 pr-4">
       <div className="mb-3 flex items-center justify-between">
@@ -66,15 +85,15 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
               <dl className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
                 <div>
                   <dt className="text-muted-foreground">Score</dt>
-                  <dd className="font-mono text-foreground">{Math.round(alert.anomaly_score * 100)}%</dd>
+                  <dd className="font-mono text-foreground">{displayScore(alert)}%</dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Latency</dt>
-                  <dd className="font-mono text-foreground">{Math.round(alert.event.latency_ms)}ms</dd>
+                  <dd className="font-mono text-foreground">{displayLatency(alert.event.latency_ms)}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Bytes</dt>
-                  <dd className="font-mono text-foreground">{Math.round(alert.event.bytes_out)}</dd>
+                  <dt className="text-muted-foreground">{byteMetric(alert).label}</dt>
+                  <dd className="font-mono text-foreground">{byteMetric(alert).value}</dd>
                 </div>
               </dl>
             </button>
