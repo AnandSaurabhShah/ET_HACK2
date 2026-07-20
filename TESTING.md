@@ -18,6 +18,7 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:5173`, sign in as `SOC-AEGIS-001 / security`, and watch for `Perimeter` badges in the alert feed.
+The live alert feed should be empty until one of these real HTTP requests is sent.
 
 ## SQL Injection Shape
 

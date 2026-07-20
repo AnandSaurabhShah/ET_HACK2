@@ -327,8 +327,9 @@ async def startup() -> None:
     refresh_nvd_cache(force=False)
     sync_events([event.model_dump() for event in EVENTS])
     sync_alerts([alert.model_dump() for alert in ALERTS])
-    DEMO_NORMAL_POOL = [event for event in generate_events() if event.label == "normal"]
-    if DEMO_TASK is None or DEMO_TASK.done():
+    if settings.demo_background_enabled:
+        DEMO_NORMAL_POOL = [event for event in generate_events() if event.label == "normal"]
+    if settings.demo_background_enabled and (DEMO_TASK is None or DEMO_TASK.done()):
         DEMO_TASK = asyncio.create_task(background_demo_traffic())
 
 
@@ -516,6 +517,7 @@ async def background_demo_traffic() -> None:
 
 def demo_status() -> dict:
     return {
+        "enabled": settings.demo_background_enabled,
         "paused": DEMO_PAUSED,
         "task_running": DEMO_TASK is not None and not DEMO_TASK.done(),
         **DEMO_STATS,
@@ -537,8 +539,15 @@ def pause_demo() -> dict:
 
 
 @app.post("/demo/resume", dependencies=[OperatorAuth])
-def resume_demo() -> dict:
-    global DEMO_PAUSED
+async def resume_demo() -> dict:
+    global DEMO_PAUSED, DEMO_TASK, DEMO_NORMAL_POOL
+    if not settings.demo_background_enabled:
+        DEMO_PAUSED = False
+        return demo_status()
+    if not DEMO_NORMAL_POOL:
+        DEMO_NORMAL_POOL = [event for event in generate_events() if event.label == "normal"]
+    if DEMO_TASK is None or DEMO_TASK.done():
+        DEMO_TASK = asyncio.create_task(background_demo_traffic())
     DEMO_PAUSED = False
     audit.append(
         actor="security_operator",
@@ -581,9 +590,12 @@ def simulate_attack(technique_id: str, count: int = Query(8, ge=1, le=30)) -> di
 def get_alerts(
     severity: str | None = None,
     technique: str | None = None,
+    source: str | None = "live_traffic",
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:
     rows = ALERTS
+    if source and source != "all":
+        rows = [alert for alert in rows if alert.event.metadata.get("source") == source]
     if severity:
         rows = [alert for alert in rows if alert.severity == severity]
     if technique:
@@ -592,14 +604,17 @@ def get_alerts(
 
 
 @app.get("/alerts/stream")
-async def alert_stream() -> EventSourceResponse:
+async def alert_stream(source: str | None = "live_traffic") -> EventSourceResponse:
     async def generator():
-        idx = 0
+        sent: set[str] = set()
         while True:
-            if ALERTS:
-                alert = ALERTS[idx % len(ALERTS)]
+            for alert in reversed(ALERTS):
+                if alert.alert_id in sent:
+                    continue
+                if source and source != "all" and alert.event.metadata.get("source") != source:
+                    continue
+                sent.add(alert.alert_id)
                 yield {"event": "alert", "data": json.dumps(alert.model_dump(), default=str)}
-                idx += 1
             await asyncio.sleep(2)
 
     return EventSourceResponse(generator())
@@ -632,8 +647,13 @@ def approve_playbook(run_id: str) -> dict:
 
 
 @app.get("/cve-queue")
-def cve_queue() -> dict:
-    observed = [alert.attribution.techniques[0].id for alert in ALERTS]
+def cve_queue(source: str | None = "live_traffic") -> dict:
+    rows = ALERTS
+    if source and source != "all":
+        rows = [alert for alert in rows if alert.event.metadata.get("source") == source]
+    observed = [alert.attribution.techniques[0].id for alert in rows]
+    if source and source != "all" and not observed:
+        return {"items": []}
     return {"items": cve_agent.rank(observed)}
 
 

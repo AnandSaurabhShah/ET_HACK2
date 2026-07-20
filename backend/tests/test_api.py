@@ -50,6 +50,7 @@ def test_core_read_endpoints() -> None:
         assert client.get("/audit?limit=2").status_code == 200
         assert client.get("/audit/verify").status_code == 200
         assert client.get("/demo/status").status_code == 200
+        assert client.get("/demo/status").json()["enabled"] is False
         paused = client.post("/demo/pause")
         assert paused.status_code == 200
         assert paused.json()["paused"] is True

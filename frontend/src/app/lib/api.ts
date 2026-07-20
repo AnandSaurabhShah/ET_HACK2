@@ -102,7 +102,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   base: API_BASE,
   report: () => request<SocMetricReport>("/eval/report"),
-  alerts: () => request<ApiList<SocAlert>>("/alerts?limit=30"),
+  alerts: () => request<ApiList<SocAlert>>("/alerts?source=live_traffic&limit=30"),
   audit: () => request<ApiList<AuditEntry>>("/audit?limit=20"),
   cves: () => request<ApiList<any>>("/cve-queue"),
   graph: () => request<any>("/twin/graph"),
@@ -123,5 +123,5 @@ export const api = {
 };
 
 export function alertsEventSource() {
-  return new EventSource(`${API_BASE}/alerts/stream`);
+  return new EventSource(`${API_BASE}/alerts/stream?source=live_traffic`);
 }

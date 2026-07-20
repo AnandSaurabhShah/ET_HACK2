@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Database, Gauge, History, Pause, Play, Radar, ShieldCheck, TimerReset } from "lucide-react";
+import { Database, Gauge, History, Radar, ShieldCheck, TimerReset } from "lucide-react";
 import { alertsEventSource, api, type AuditEntry, type PlaybookRun, type SocAlert, type SocMetricReport } from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
@@ -34,8 +34,6 @@ export function SocDashboard() {
   const [graph, setGraph] = useState<any>(null);
   const [simulation, setSimulation] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [simStatus, setSimStatus] = useState<string | null>(null);
-  const [demoStatus, setDemoStatus] = useState<any>(null);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
 
@@ -53,7 +51,6 @@ export function SocDashboard() {
       setAudit(auditRes.items);
       setCves(cveRes.items);
       setGraph(graphRes);
-      setDemoStatus(await api.demoStatus());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reach backend");
@@ -95,60 +92,27 @@ export function SocDashboard() {
     setAudit(auditRes.items);
   }
 
-  async function simulateBruteForce() {
-    setSimStatus("Running T1110...");
-    const response = await api.simulateAttack("T1110", 8);
-    const newAlerts = response.results.filter((item: any) => item.alert_id).map((item: any) => item.alert_id);
-    setSimStatus(`T1110 complete: ${newAlerts.length} alerts raised`);
-    await refresh();
-  }
-
-  async function toggleDemoTraffic() {
-    const next = demoStatus?.paused ? await api.resumeDemo() : await api.pauseDemo();
-    setDemoStatus(next);
-    setSimStatus(next.paused ? "Background demo traffic paused" : "Background demo traffic resumed");
-  }
-
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="font-mono text-[11px] tracking-wide text-muted-foreground">AEGIS-CNI · SECURITY ROLE</p>
+          <p className="font-mono text-[11px] tracking-wide text-muted-foreground">AEGIS-CNI - SECURITY ROLE</p>
           <h1 style={{ fontFamily: "var(--font-serif)" }} className="mt-1 text-[24px] text-foreground">
             SOC Command Center
           </h1>
           <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-            Behavioural anomaly detection, ATT&CK attribution, SOAR containment, CVE prioritisation, and auditability for the exam platform.
+            Live request-layer detection, ATT&CK attribution, SOAR containment, CVE prioritisation, and auditability for the exam platform.
           </p>
         </div>
         <span className="rounded-sm border border-border/70 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
           API {api.base}
         </span>
-        <button
-          onClick={() => void simulateBruteForce()}
-          className="inline-flex items-center gap-2 rounded-sm bg-primary px-3 py-2 text-[12px] text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Play className="size-3.5" /> Simulate T1110
-        </button>
-        <button
-          onClick={() => void toggleDemoTraffic()}
-          className="inline-flex items-center gap-2 rounded-sm border border-border/70 bg-card px-3 py-2 text-[12px] text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {demoStatus?.paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
-          {demoStatus?.paused ? "Resume Traffic" : "Pause Traffic"}
-        </button>
       </div>
-      {simStatus && <div className="mb-4 rounded-sm border border-border/70 bg-card p-3 font-mono text-[12px] text-foreground">{simStatus}</div>}
-      {demoStatus && (
-        <div className="mb-4 rounded-sm border border-border/70 bg-muted px-3 py-2 font-mono text-[11px] text-muted-foreground">
-          BACKGROUND TRAFFIC · {demoStatus.paused ? "PAUSED" : "RUNNING"} · benign {demoStatus.benign_events} · attacks {demoStatus.attack_events}
-        </div>
-      )}
 
       {error && <div className="mb-4 rounded-sm border border-accent bg-accent/5 p-3 text-[13px] text-foreground">Backend unavailable: {error}</div>}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <Metric icon={Radar} label="Detection" value={pct(report?.detection_rate)} sub={`${report?.alert_count ?? 0} alerts`} />
+        <Metric icon={Radar} label="Detection" value={pct(report?.detection_rate)} sub={`${report?.alert_count ?? 0} eval alerts`} />
         <Metric icon={Gauge} label="False Positive" value={pct(report?.false_positive_rate)} sub="eval harness" />
         <Metric icon={ShieldCheck} label="ATT&CK Accuracy" value={pct(report?.attack_technique_accuracy)} sub={`${report?.mitre_technique_count ?? 0} MITRE techniques`} />
         <Metric icon={TimerReset} label="MTTD" value={`${report?.mttd_minutes ?? 0}m`} sub={`${report?.mttd_improvement ?? 0}x faster`} />

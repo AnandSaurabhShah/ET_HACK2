@@ -104,9 +104,11 @@ Live request-layer detection is documented in [TESTING.md](./TESTING.md). It inc
 
 Zip archives in the workspace were not used.
 
-## Safe ATT&CK Live Testing
+## Live CMD/PowerShell Attack Testing
 
-I cannot provide real exploit or malware code for ATT&CK techniques. For live validation, use the safe telemetry simulator:
+The SOC dashboard feed is live-only by default. Seeded/evaluation alerts train and validate the model, but they are not shown in the dashboard's live alert feed. To make an alert appear, send a request-layer attack shape from CMD, PowerShell, curl, or another HTTP client as documented in [TESTING.md](./TESTING.md).
+
+The safe telemetry simulator is still available for development, but it is no longer exposed as a dashboard button:
 
 ```bash
 cd backend
@@ -115,17 +117,16 @@ python tools/attack_simulator.py --list --tactic credential-access
 python tools/attack_simulator.py --technique T1110 --count 8
 ```
 
-This sends benign labelled events to `/ingest/events`, so the SOC can detect and audit the selected technique without attacking the machine.
-
-The SOC dashboard also includes a **Simulate T1110** button that triggers the same safe live flow through the backend.
+This sends benign labelled events to `/ingest/events`; use it only when you explicitly want simulator data.
 
 ## Background Demo Traffic
 
-When the backend starts, it launches a background demo traffic task:
+Background demo traffic is disabled by default (`AEGIS_DEMO_BACKGROUND_ENABLED=false`) so the dashboard does not continuously display sample requests.
+
+If you deliberately enable it, the backend can still run the old sample traffic task:
 
 - Every 3-8 seconds it sends one benign synthetic exam-portal telemetry event through the same scoring/attribution/persistence/audit pipeline as `/ingest/events`.
-- Roughly every 45-90 seconds it injects one safe ATT&CK simulation event so a fresh alert appears without anyone clicking.
-- The SOC dashboard includes **Pause Traffic** / **Resume Traffic** controls.
+- Roughly every 45-90 seconds it injects one safe ATT&CK simulation event.
 
 Terminal controls:
 

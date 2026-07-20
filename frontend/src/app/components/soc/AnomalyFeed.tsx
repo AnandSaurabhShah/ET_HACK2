@@ -27,7 +27,7 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
     <section className="min-h-[420px] border-r border-border/70 pr-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
-          <Radio className="size-4" /> Behavioural Anomaly Feed
+          <Radio className="size-4" /> Live Attack Feed
         </h2>
         <span className="font-mono text-[11px] text-muted-foreground">{alerts.length} OPEN</span>
       </div>
@@ -85,7 +85,7 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
         ))}
         {!alerts.length && (
           <div className="rounded-sm border border-border/70 bg-card p-5 text-[13px] text-muted-foreground">
-            <AlertTriangle className="mb-2 size-4" /> No alerts returned. Start the backend and run `python seed.py`.
+            <AlertTriangle className="mb-2 size-4" /> No live attacks detected.
           </div>
         )}
       </div>
