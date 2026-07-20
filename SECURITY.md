@@ -11,6 +11,7 @@ This repository is no longer only a hackathon MVP. It now includes the first pro
 - `/ready` dependency readiness endpoint.
 - `/audit/verify` hash-chain integrity endpoint.
 - Sandboxed SOAR executor with Docker-backed `block_ip` and `isolate_endpoint` verification when Docker is available.
+- Background demo traffic can be paused with `/demo/pause` when controlled judging is preferred.
 
 ## Required Before Real Deployment
 

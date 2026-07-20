@@ -108,6 +108,9 @@ export const api = {
   simulateTwin: () => request<any>("/twin/simulate", { method: "POST" }),
   simulateAttack: (techniqueId = "T1110", count = 8) =>
     request<any>(`/simulate/attack/${techniqueId}?count=${count}`, { method: "POST" }),
+  demoStatus: () => request<any>("/demo/status"),
+  pauseDemo: () => request<any>("/demo/pause", { method: "POST" }),
+  resumeDemo: () => request<any>("/demo/resume", { method: "POST" }),
   runPlaybook: (alertId: string) => request<PlaybookRun>(`/playbooks/${alertId}/run`, { method: "POST" }),
   approvePlaybook: (runId: string) => request<PlaybookRun>(`/playbooks/${runId}/approve`, { method: "POST" }),
   ingestEvent: (body: Record<string, unknown>) =>

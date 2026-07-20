@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from threading import Lock
 from typing import Any
 
 from app.models.schemas import AuditEntry
 from app.paths import AUDIT_LOG_PATH, ensure_dirs
 from app.storage import append_jsonl, read_jsonl, utc_now
 from app.db import insert_audit
+
+_AUDIT_LOCK = Lock()
 
 
 def _hash_payload(payload: dict[str, Any]) -> str:
@@ -47,19 +50,20 @@ class AuditLog:
         blast_radius: int,
         payload: dict[str, Any] | None = None,
     ) -> AuditEntry:
-        rows = read_jsonl(AUDIT_LOG_PATH)
-        previous_hash = rows[-1]["hash"] if rows else "GENESIS"
-        entry_payload = {
-            "index": len(rows),
-            "timestamp": utc_now().isoformat(),
-            "actor": actor,
-            "action": action,
-            "justification": justification,
-            "blast_radius": blast_radius,
-            "payload": payload or {},
-            "previous_hash": previous_hash,
-        }
-        entry_payload["hash"] = _hash_payload(entry_payload)
-        append_jsonl(AUDIT_LOG_PATH, entry_payload)
-        insert_audit(entry_payload)
-        return AuditEntry(**entry_payload)
+        with _AUDIT_LOCK:
+            rows = read_jsonl(AUDIT_LOG_PATH)
+            previous_hash = rows[-1]["hash"] if rows else "GENESIS"
+            entry_payload = {
+                "index": len(rows),
+                "timestamp": utc_now().isoformat(),
+                "actor": actor,
+                "action": action,
+                "justification": justification,
+                "blast_radius": blast_radius,
+                "payload": payload or {},
+                "previous_hash": previous_hash,
+            }
+            entry_payload["hash"] = _hash_payload(entry_payload)
+            append_jsonl(AUDIT_LOG_PATH, entry_payload)
+            insert_audit(entry_payload)
+            return AuditEntry(**entry_payload)

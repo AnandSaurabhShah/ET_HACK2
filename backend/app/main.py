@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -44,6 +46,11 @@ cve_agent = CveAgent()
 graph_agent = GraphAgent()
 EVENTS: list[TelemetryEvent] = []
 ALERTS: list[Alert] = []
+DEMO_TASK: asyncio.Task | None = None
+DEMO_PAUSED = False
+DEMO_NORMAL_POOL: list[TelemetryEvent] = []
+DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
+DEMO_STATS = {"benign_events": 0, "attack_events": 0, "last_event": None, "last_alert_id": None}
 
 
 def _load_events() -> list[TelemetryEvent]:
@@ -61,10 +68,10 @@ def _load_alerts() -> list[Alert]:
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     ensure_dirs()
     init_db()
-    global EVENTS, ALERTS
+    global EVENTS, ALERTS, DEMO_TASK, DEMO_NORMAL_POOL
     EVENTS = _load_events()
     anomaly_agent.fit(EVENTS)
     ALERTS = _load_alerts()
@@ -74,6 +81,21 @@ def startup() -> None:
     refresh_nvd_cache(force=False)
     sync_events([event.model_dump() for event in EVENTS])
     sync_alerts([alert.model_dump() for alert in ALERTS])
+    DEMO_NORMAL_POOL = [event for event in generate_events() if event.label == "normal"]
+    if DEMO_TASK is None or DEMO_TASK.done():
+        DEMO_TASK = asyncio.create_task(background_demo_traffic())
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global DEMO_TASK
+    if DEMO_TASK:
+        DEMO_TASK.cancel()
+        try:
+            await DEMO_TASK
+        except asyncio.CancelledError:
+            pass
+        DEMO_TASK = None
 
 
 @app.get("/health")
@@ -88,6 +110,7 @@ def ready() -> dict:
         "database": db_health(),
         "anomaly_model_fit": anomaly_agent._fit,
         "mitre_techniques": len(attribution_agent.retriever.techniques),
+        "demo_traffic": demo_status(),
     }
 
 
@@ -98,10 +121,26 @@ def ingest_event(raw: RawEvent, request: Request, _: None = Depends(check_ingest
 
 def process_event(raw: RawEvent) -> dict:
     event = normalize_frontend_event(raw)
+    return process_telemetry_event(event)
+
+
+def process_telemetry_event(event: TelemetryEvent) -> dict:
     EVENTS.append(event)
     append_jsonl(EVENTS_PATH, event.model_dump())
     upsert_event(event.model_dump())
     score = anomaly_agent.score(event)
+    audit.append(
+        actor="ingest_pipeline",
+        action="score_event",
+        justification=f"Telemetry event {event.event_id} scored through the shared anomaly pipeline.",
+        blast_radius=0,
+        payload={
+            "event_id": event.event_id,
+            "score": round(score, 3),
+            "label": event.label,
+            "source": event.metadata.get("source"),
+        },
+    )
     alert_id = None
     if score >= anomaly_agent.threshold:
         alert_id = f"ALT-{len(ALERTS) + 1:05d}"
@@ -130,6 +169,128 @@ def process_event(raw: RawEvent) -> dict:
     return {"accepted": True, "score": round(score, 3), "alert_id": alert_id}
 
 
+def clone_demo_benign_event(template: TelemetryEvent) -> TelemetryEvent:
+    now = datetime.now(timezone.utc)
+    return template.model_copy(
+        update={
+            "event_id": f"DEMO-BENIGN-{int(now.timestamp() * 1000)}-{random.randint(1000, 9999)}",
+            "timestamp": template.timestamp,
+            "label": "normal",
+            "attack_id": None,
+            "technique_id": None,
+            "metadata": {
+                **template.metadata,
+                "source": "background_demo_traffic",
+                "simulation": True,
+                "safe": True,
+            },
+        }
+    )
+
+
+def next_demo_benign_event(rng: random.Random) -> TelemetryEvent | None:
+    if not DEMO_NORMAL_POOL:
+        return None
+    candidate = clone_demo_benign_event(rng.choice(DEMO_NORMAL_POOL))
+    for _ in range(12):
+        if anomaly_agent.score(candidate) < anomaly_agent.threshold:
+            return candidate
+        candidate = clone_demo_benign_event(rng.choice(DEMO_NORMAL_POOL))
+    return candidate
+
+
+def build_demo_attack_event(idx: int) -> TelemetryEvent:
+    technique_id = random.choice(DEMO_ATTACK_TECHNIQUES)
+    technique = find_technique(technique_id)
+    raw = build_attack_event(technique, idx, 1)
+    event = normalize_frontend_event(RawEvent.model_validate(raw))
+    return event.model_copy(
+        update={
+            "event_id": f"DEMO-ATTACK-{technique_id}-{int(event.timestamp.timestamp() * 1000)}-{random.randint(1000, 9999)}",
+            "label": "background_attack_simulation",
+            "attack_id": "DEMO-BACKGROUND",
+            "technique_id": technique_id,
+            "metadata": {
+                **event.metadata,
+                "source": "background_demo_traffic",
+                "simulation": True,
+                "safe": True,
+                "background": True,
+            },
+        }
+    )
+
+
+async def background_demo_traffic() -> None:
+    global DEMO_PAUSED
+    rng = random.Random()
+    next_attack_in = rng.uniform(45, 90)
+    seconds_until_attack = next_attack_in
+    attack_idx = 1
+    while True:
+        delay = rng.uniform(3, 8)
+        await asyncio.sleep(delay)
+        if DEMO_PAUSED:
+            continue
+        seconds_until_attack -= delay
+        if seconds_until_attack <= 0:
+            event = build_demo_attack_event(attack_idx)
+            result = process_telemetry_event(event)
+            DEMO_STATS["attack_events"] += 1
+            DEMO_STATS["last_event"] = event.event_id
+            DEMO_STATS["last_alert_id"] = result.get("alert_id")
+            attack_idx += 1
+            seconds_until_attack = rng.uniform(45, 90)
+            continue
+        event = next_demo_benign_event(rng)
+        if event:
+            result = process_telemetry_event(event)
+            DEMO_STATS["benign_events"] += 1
+            DEMO_STATS["last_event"] = event.event_id
+            DEMO_STATS["last_alert_id"] = result.get("alert_id")
+
+
+def demo_status() -> dict:
+    return {
+        "paused": DEMO_PAUSED,
+        "task_running": DEMO_TASK is not None and not DEMO_TASK.done(),
+        **DEMO_STATS,
+    }
+
+
+@app.post("/demo/pause", dependencies=[OperatorAuth])
+def pause_demo() -> dict:
+    global DEMO_PAUSED
+    DEMO_PAUSED = True
+    audit.append(
+        actor="security_operator",
+        action="pause_background_demo_traffic",
+        justification="Operator paused autonomous background demo traffic.",
+        blast_radius=0,
+        payload=demo_status(),
+    )
+    return demo_status()
+
+
+@app.post("/demo/resume", dependencies=[OperatorAuth])
+def resume_demo() -> dict:
+    global DEMO_PAUSED
+    DEMO_PAUSED = False
+    audit.append(
+        actor="security_operator",
+        action="resume_background_demo_traffic",
+        justification="Operator resumed autonomous background demo traffic.",
+        blast_radius=0,
+        payload=demo_status(),
+    )
+    return demo_status()
+
+
+@app.get("/demo/status")
+def get_demo_status() -> dict:
+    return demo_status()
+
+
 @app.post("/simulate/attack/{technique_id}", dependencies=[OperatorAuth])
 def simulate_attack(technique_id: str, count: int = Query(8, ge=1, le=30)) -> dict:
     try:
@@ -138,7 +299,9 @@ def simulate_attack(technique_id: str, count: int = Query(8, ge=1, le=30)) -> di
         raise HTTPException(status_code=404, detail="Technique not found in local ATT&CK corpus")
     results = []
     for idx in range(1, count + 1):
-        result = process_event(RawEvent.model_validate(build_attack_event(technique, idx, count)))
+        event = normalize_frontend_event(RawEvent.model_validate(build_attack_event(technique, idx, count)))
+        event = event.model_copy(update={"label": "manual_attack_simulation", "attack_id": "MANUAL-SIMULATION", "technique_id": technique["id"]})
+        result = process_telemetry_event(event)
         results.append(result)
     audit.append(
         actor="attack_simulator",

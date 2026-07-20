@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Database, Gauge, History, Play, Radar, ShieldCheck, TimerReset } from "lucide-react";
+import { Database, Gauge, History, Pause, Play, Radar, ShieldCheck, TimerReset } from "lucide-react";
 import { alertsEventSource, api, type AuditEntry, type PlaybookRun, type SocAlert, type SocMetricReport } from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
@@ -35,6 +35,7 @@ export function SocDashboard() {
   const [simulation, setSimulation] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [simStatus, setSimStatus] = useState<string | null>(null);
+  const [demoStatus, setDemoStatus] = useState<any>(null);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
 
@@ -52,6 +53,7 @@ export function SocDashboard() {
       setAudit(auditRes.items);
       setCves(cveRes.items);
       setGraph(graphRes);
+      setDemoStatus(await api.demoStatus());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reach backend");
@@ -101,6 +103,12 @@ export function SocDashboard() {
     await refresh();
   }
 
+  async function toggleDemoTraffic() {
+    const next = demoStatus?.paused ? await api.resumeDemo() : await api.pauseDemo();
+    setDemoStatus(next);
+    setSimStatus(next.paused ? "Background demo traffic paused" : "Background demo traffic resumed");
+  }
+
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -122,8 +130,20 @@ export function SocDashboard() {
         >
           <Play className="size-3.5" /> Simulate T1110
         </button>
+        <button
+          onClick={() => void toggleDemoTraffic()}
+          className="inline-flex items-center gap-2 rounded-sm border border-border/70 bg-card px-3 py-2 text-[12px] text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {demoStatus?.paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
+          {demoStatus?.paused ? "Resume Traffic" : "Pause Traffic"}
+        </button>
       </div>
       {simStatus && <div className="mb-4 rounded-sm border border-border/70 bg-card p-3 font-mono text-[12px] text-foreground">{simStatus}</div>}
+      {demoStatus && (
+        <div className="mb-4 rounded-sm border border-border/70 bg-muted px-3 py-2 font-mono text-[11px] text-muted-foreground">
+          BACKGROUND TRAFFIC · {demoStatus.paused ? "PAUSED" : "RUNNING"} · benign {demoStatus.benign_events} · attacks {demoStatus.attack_events}
+        </div>
+      )}
 
       {error && <div className="mb-4 rounded-sm border border-accent bg-accent/5 p-3 text-[13px] text-foreground">Backend unavailable: {error}</div>}
 

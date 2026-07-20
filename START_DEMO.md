@@ -21,6 +21,6 @@ Demo path:
 2. Login as `SOC-AEGIS-001 / security`.
 3. Click **Simulate T1110** in the SOC dashboard.
 4. Watch live SSE alerts appear.
-5. Run a playbook and approve any queued high-blast-radius action.
-6. Show `http://127.0.0.1:8000/audit/verify`.
-
+5. Let background demo traffic run, then try **Pause Traffic** and **Resume Traffic**.
+6. Run a playbook and approve any queued high-blast-radius action.
+7. Show `http://127.0.0.1:8000/audit/verify`.

@@ -92,6 +92,9 @@ SIMULATED/MOCKED:
 - `GET /audit/verify`
 - `GET /eval/report`
 - `GET /ready`
+- `GET /demo/status`
+- `POST /demo/pause`
+- `POST /demo/resume`
 
 ## MITRE Coverage
 
@@ -113,6 +116,22 @@ python tools/attack_simulator.py --technique T1110 --count 8
 This sends benign labelled events to `/ingest/events`, so the SOC can detect and audit the selected technique without attacking the machine.
 
 The SOC dashboard also includes a **Simulate T1110** button that triggers the same safe live flow through the backend.
+
+## Background Demo Traffic
+
+When the backend starts, it launches a background demo traffic task:
+
+- Every 3-8 seconds it sends one benign synthetic exam-portal telemetry event through the same scoring/attribution/persistence/audit pipeline as `/ingest/events`.
+- Roughly every 45-90 seconds it injects one safe ATT&CK simulation event so a fresh alert appears without anyone clicking.
+- The SOC dashboard includes **Pause Traffic** / **Resume Traffic** controls.
+
+Terminal controls:
+
+```bash
+curl http://127.0.0.1:8000/demo/status
+curl -X POST http://127.0.0.1:8000/demo/pause
+curl -X POST http://127.0.0.1:8000/demo/resume
+```
 
 ## Sandboxed Playbook Execution
 
