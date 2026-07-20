@@ -56,3 +56,27 @@ def test_core_read_endpoints() -> None:
         resumed = client.post("/demo/resume")
         assert resumed.status_code == 200
         assert resumed.json()["paused"] is False
+
+
+def test_perimeter_signature_blocks_follow_up_request() -> None:
+    with TestClient(app) as client:
+        ip = "198.51.100.210"
+        first = client.get("/health?q=' OR '1'='1", headers={"X-Forwarded-For": ip})
+        assert first.status_code == 403
+
+        follow_up = client.get("/health", headers={"X-Forwarded-For": ip})
+        assert follow_up.status_code == 403
+
+        audit = client.get("/audit/verify")
+        assert audit.status_code == 200
+        assert audit.json()["ok"] is True
+
+
+def test_scanner_user_agent_alone_is_supporting_signal_only() -> None:
+    with TestClient(app) as client:
+        ip = "198.51.100.211"
+        first = client.get("/health", headers={"X-Forwarded-For": ip, "User-Agent": "sqlmap/1.8"})
+        assert first.status_code == 200
+
+        follow_up = client.get("/health", headers={"X-Forwarded-For": ip})
+        assert follow_up.status_code == 200

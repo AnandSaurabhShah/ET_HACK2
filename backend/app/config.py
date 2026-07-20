@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     )
     ingest_rate_limit_per_minute: int = Field(default=180, alias="AEGIS_INGEST_RATE_LIMIT_PER_MINUTE")
     high_blast_radius_threshold: int = Field(default=6, alias="AEGIS_HIGH_BLAST_RADIUS_THRESHOLD")
+    perimeter_block_cooldown_seconds: int = Field(default=900, alias="AEGIS_PERIMETER_BLOCK_COOLDOWN_SECONDS")
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -27,4 +28,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

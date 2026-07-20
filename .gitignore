@@ -4,8 +4,12 @@ frontend/.env
 backend/.env
 frontend/frontend-vite.log
 frontend/frontend-vite.err.log
+frontend/*.out.log
+frontend/*.err.log
 backend/backend-uvicorn.log
 backend/backend-uvicorn.err.log
+backend/*.out.log
+backend/*.err.log
 backend/**/__pycache__/
 backend/app/rag/chroma/
 backend/app/data/*.db

@@ -96,6 +96,8 @@ SIMULATED/MOCKED:
 - `POST /demo/pause`
 - `POST /demo/resume`
 
+Live request-layer detection is documented in [TESTING.md](./TESTING.md). It includes curl/PowerShell checks for SQL injection-shaped payloads, command injection-shaped payloads, path traversal, XSS, scanner User-Agents as supporting signals, endpoint enumeration, brute force, HTTP 403 block enforcement, and audit verification.
+
 ## MITRE Coverage
 
 `python seed.py` builds a local corpus from the official MITRE Enterprise ATT&CK STIX JSON and stores the distilled result in `backend/app/rag/fixtures/mitre_enterprise_techniques.json`. The current seeded corpus contains all non-deprecated Enterprise ATT&CK attack-pattern entries found in that source at seed time, including mitigation relationships where MITRE publishes them. Runtime does not depend on live MITRE or CVE internet calls.

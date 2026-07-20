@@ -54,6 +54,7 @@ export interface SocAlert {
     label: string;
     attack_id?: string;
     technique_id?: string;
+    metadata?: Record<string, unknown>;
   };
   attribution: {
     alert_id: string;

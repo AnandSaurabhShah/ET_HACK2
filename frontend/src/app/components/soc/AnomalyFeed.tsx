@@ -17,6 +17,12 @@ const severityClass: Record<string, string> = {
 };
 
 export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
+  function layer(alert: SocAlert) {
+    return alert.event.metadata?.detection_layer === "perimeter" || alert.event.metadata?.source === "live_traffic"
+      ? "Perimeter"
+      : "Behavioural";
+  }
+
   return (
     <section className="min-h-[420px] border-r border-border/70 pr-4">
       <div className="mb-3 flex items-center justify-between">
@@ -43,9 +49,19 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
                   </p>
                   <h3 className="mt-1 text-[14px] font-semibold text-foreground">{alert.title}</h3>
                 </div>
-                <span className="rounded-sm bg-muted px-2 py-1 font-mono text-[11px] uppercase text-foreground">
-                  {alert.severity}
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="rounded-sm bg-muted px-2 py-1 font-mono text-[11px] uppercase text-foreground">
+                    {alert.severity}
+                  </span>
+                  <span
+                    className={[
+                      "rounded-sm px-2 py-1 font-mono text-[10px] uppercase",
+                      layer(alert) === "Perimeter" ? "bg-accent/10 text-accent" : "bg-primary/10 text-primary",
+                    ].join(" ")}
+                  >
+                    {layer(alert)}
+                  </span>
+                </div>
               </div>
               <dl className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
                 <div>
@@ -76,4 +92,3 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
     </section>
   );
 }
-
