@@ -89,3 +89,16 @@ def test_scanner_user_agent_alone_is_supporting_signal_only() -> None:
 
         follow_up = client.get("/health", headers={"X-Forwarded-For": ip})
         assert follow_up.status_code == 200
+
+
+def test_localhost_block_does_not_break_soc_read_dashboard() -> None:
+    with TestClient(app) as client:
+        first = client.get("/health?q=' OR '1'='1")
+        assert first.status_code == 403
+
+        protected_follow_up = client.get("/health")
+        assert protected_follow_up.status_code == 403
+
+        assert client.get("/alerts?source=live_traffic&limit=5").status_code == 200
+        assert client.get("/audit?limit=5").status_code == 200
+        assert client.get("/ready").status_code == 200

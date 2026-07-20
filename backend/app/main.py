@@ -58,6 +58,7 @@ DEMO_NORMAL_POOL: list[TelemetryEvent] = []
 DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
 DEMO_STATS = {"benign_events": 0, "attack_events": 0, "last_event": None, "last_alert_id": None}
 MIDDLEWARE_SKIP_PREFIXES = ("/alerts/stream",)
+LOCAL_SOC_READ_PREFIXES = ("/alerts", "/audit", "/ready", "/eval/report", "/cve-queue", "/twin/graph", "/demo/status")
 
 
 def _load_events() -> list[TelemetryEvent]:
@@ -79,6 +80,16 @@ def client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",", 1)[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def _allow_local_blocked_soc_read(request: Request, ip: str, path: str) -> bool:
+    if request.method != "GET":
+        return False
+    if request.headers.get("x-forwarded-for"):
+        return False
+    if ip not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        return False
+    return any(path.startswith(prefix) for prefix in LOCAL_SOC_READ_PREFIXES)
 
 
 def _set_replay_body(request: Request, body: bytes) -> None:
@@ -235,7 +246,7 @@ def _should_block(signal: SignatureMatch | RateSignal) -> bool:
 async def live_request_detection_middleware(request: Request, call_next):
     path = request.url.path
     ip = client_ip(request)
-    if GLOBAL_BLOCKLIST.is_blocked(ip):
+    if GLOBAL_BLOCKLIST.is_blocked(ip) and not _allow_local_blocked_soc_read(request, ip, path):
         audit.append(
             actor="perimeter_middleware",
             action="reject_blocked_ip",
