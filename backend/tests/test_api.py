@@ -51,6 +51,13 @@ def test_core_read_endpoints() -> None:
         assert client.get("/twin/graph").status_code == 200
         assert client.get("/audit?limit=2").status_code == 200
         assert client.get("/audit/verify").status_code == 200
+        coverage = client.get("/coverage/mitre")
+        assert coverage.status_code == 200
+        assert coverage.json()["summary"]["total"] >= 600
+        assert coverage.json()["summary"]["active_live"] >= 6
+        connectors = client.get("/integrations/connectors")
+        assert connectors.status_code == 200
+        assert len(connectors.json()["items"]) >= 5
         assert client.get("/demo/status").status_code == 200
         assert client.get("/demo/status").json()["enabled"] is False
         paused = client.post("/demo/pause")
@@ -80,6 +87,14 @@ def test_perimeter_signature_blocks_follow_up_request() -> None:
         assert "model_scores" in alert["event"]["metadata"]
         assert "prediction" in alert["event"]["metadata"]
 
+        timeline = client.get(f"/incidents/{alert['alert_id']}/timeline")
+        assert timeline.status_code == 200
+        assert len(timeline.json()["items"]) >= 3
+
+        copilot = client.post("/copilot/ask", json={"alert_id": alert["alert_id"], "question": "Why was this blocked?"})
+        assert copilot.status_code == 200
+        assert "answer" in copilot.json()
+
 
 def test_scanner_user_agent_alone_is_supporting_signal_only() -> None:
     with TestClient(app) as client:
@@ -102,3 +117,5 @@ def test_localhost_block_does_not_break_soc_read_dashboard() -> None:
         assert client.get("/alerts?source=live_traffic&limit=5").status_code == 200
         assert client.get("/audit?limit=5").status_code == 200
         assert client.get("/ready").status_code == 200
+        assert client.get("/coverage/mitre").status_code == 200
+        assert client.get("/integrations/connectors").status_code == 200

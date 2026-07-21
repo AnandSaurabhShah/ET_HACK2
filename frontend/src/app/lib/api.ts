@@ -86,6 +86,32 @@ export interface AuditEntry {
   hash: string;
 }
 
+export interface MitreCoverage {
+  summary: { total: number; active_live: number; attribution_ready: number; needs_connector: number; connectors: number };
+  tactics: { tactic: string; total: number; active_live: number; attribution_ready: number; needs_connector: number }[];
+  techniques: { id: string; name: string; tactics: string[]; status: string; reason: string; url: string }[];
+}
+
+export interface IncidentTimeline {
+  alert_id: string;
+  items: { stage: string; timestamp: string; title: string; detail: string; status: string; actor?: string; hash?: string }[];
+}
+
+export interface ConnectorInfo {
+  name: string;
+  category: string;
+  status: string;
+  production_target: string;
+  implemented_interface: string[];
+  required_for: string[];
+}
+
+export interface CopilotAnswer {
+  answer: string;
+  evidence: string[];
+  recommended_actions: string[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -104,6 +130,11 @@ export const api = {
   report: () => request<SocMetricReport>("/eval/report"),
   alerts: () => request<ApiList<SocAlert>>("/alerts?source=live_traffic&limit=30"),
   audit: () => request<ApiList<AuditEntry>>("/audit?limit=20"),
+  coverage: () => request<MitreCoverage>("/coverage/mitre"),
+  timeline: (alertId: string) => request<IncidentTimeline>(`/incidents/${alertId}/timeline`),
+  connectors: () => request<ApiList<ConnectorInfo>>("/integrations/connectors"),
+  askCopilot: (question: string, alertId?: string) =>
+    request<CopilotAnswer>("/copilot/ask", { method: "POST", body: JSON.stringify({ question, alert_id: alertId }) }),
   cves: () => request<ApiList<any>>("/cve-queue"),
   graph: () => request<any>("/twin/graph"),
   simulateTwin: () => request<any>("/twin/simulate", { method: "POST" }),

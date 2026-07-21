@@ -26,7 +26,8 @@ from app.ingest.exam_app_adapter import normalize_frontend_event
 from app.ingest.attack_simulation import build_attack_event, find_technique
 from app.ingest.nvd_client import refresh_nvd_cache
 from app.ingest.synth_generator import generate_events
-from app.models.schemas import Alert, RawEvent, TelemetryEvent
+from app.integrations.connectors import connector_catalog
+from app.models.schemas import Alert, CopilotQuestion, RawEvent, TelemetryEvent
 from app.paths import ALERTS_PATH, EVAL_REPORT_PATH, EVENTS_PATH, ensure_dirs
 from app.storage import append_jsonl, read_json, read_jsonl, utc_now, write_json, write_jsonl
 from app.security import GLOBAL_BLOCKLIST, GLOBAL_RATE_TRACKER, OperatorAuth, RateSignal, check_ingest_rate_limit
@@ -58,8 +59,28 @@ DEMO_NORMAL_POOL: list[TelemetryEvent] = []
 DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
 DEMO_STATS = {"benign_events": 0, "attack_events": 0, "last_event": None, "last_alert_id": None}
 MIDDLEWARE_SKIP_PREFIXES = ("/alerts/stream",)
-LOCAL_SOC_READ_PREFIXES = ("/alerts", "/audit", "/ready", "/eval/report", "/cve-queue", "/twin/graph", "/demo/status")
+LOCAL_SOC_READ_PREFIXES = (
+    "/alerts",
+    "/audit",
+    "/ready",
+    "/eval/report",
+    "/cve-queue",
+    "/twin/graph",
+    "/demo/status",
+    "/coverage",
+    "/integrations",
+    "/incidents",
+)
 DENY_MESSAGE = "Aegis-CNI perimeter blocklist denied this request."
+ACTIVE_LIVE_TECHNIQUES = {
+    "T1059": "command injection-shaped request detection",
+    "T1083": "path traversal-shaped request detection",
+    "T1110": "failed-login/brute-force pressure",
+    "T1189": "XSS-shaped request detection",
+    "T1190": "SQLi/public-app exploit-shaped request detection",
+    "T1499": "oversized/malformed request pressure",
+    "T1595": "request burst and endpoint enumeration",
+}
 
 
 def _load_events() -> list[TelemetryEvent]:
@@ -499,6 +520,127 @@ def run_orchestrator_for_alert(alert_id: str, actor: str) -> None:
     )
 
 
+def _alert_by_id(alert_id: str) -> Alert | None:
+    return next((row for row in ALERTS if row.alert_id == alert_id), None)
+
+
+def _coverage_status(technique_id: str) -> tuple[str, str]:
+    base_id = technique_id.split(".", 1)[0]
+    if technique_id in ACTIVE_LIVE_TECHNIQUES or base_id in ACTIVE_LIVE_TECHNIQUES:
+        return "active_live", ACTIVE_LIVE_TECHNIQUES.get(technique_id) or ACTIVE_LIVE_TECHNIQUES[base_id]
+    connector_map = {
+        "T1003": "Requires EDRConnector for credential dumping telemetry.",
+        "T1021": "Requires SIEM/EDR/IAM connectors for real lateral movement telemetry.",
+        "T1041": "Requires proxy/DNS/firewall telemetry for C2 exfiltration.",
+        "T1055": "Requires EDRConnector for process injection visibility.",
+        "T1070": "Requires EDR/SIEM log tampering telemetry.",
+        "T1078": "Requires IAMConnector for real valid-account abuse containment.",
+        "T1098": "Requires IAM/CloudAudit connectors for account manipulation.",
+        "T1105": "Requires firewall/proxy telemetry for ingress transfer.",
+        "T1562": "Requires EDR/SIEM security-control health telemetry.",
+        "T1567": "Requires proxy/CASB/cloud telemetry for cloud exfiltration.",
+    }
+    if base_id in connector_map:
+        return "needs_connector", connector_map[base_id]
+    return "attribution_ready", "Loaded in ATT&CK corpus for RAG/GenAI attribution and safe simulation."
+
+
+def _timeline_for_alert(alert: Alert) -> list[dict]:
+    event = alert.event
+    scores = event.metadata.get("model_scores", {}) if event.metadata else {}
+    timeline = [
+        {
+            "stage": "observed",
+            "timestamp": event.timestamp,
+            "title": f"{event.event_type} observed",
+            "detail": f"{event.ip} hit {event.metadata.get('method', 'event')} {event.metadata.get('route', event.segment)}",
+            "status": "complete",
+        },
+        {
+            "stage": "scored",
+            "timestamp": alert.created_at,
+            "title": "AI scoring completed",
+            "detail": (
+                f"decision={scores.get('decision_score', alert.anomaly_score)}, "
+                f"anomaly={scores.get('anomaly_score', alert.anomaly_score)}, "
+                f"predictive={scores.get('predictive_risk_score', 'n/a')}"
+            ),
+            "status": "complete",
+        },
+        {
+            "stage": "attributed",
+            "timestamp": alert.created_at,
+            "title": f"Mapped to {alert.attribution.techniques[0].id}",
+            "detail": alert.attribution.likely_next_stage,
+            "status": "complete",
+        },
+    ]
+    related = []
+    for entry in reversed(audit.entries(limit=500)):
+        payload = entry.payload or {}
+        if payload.get("alert_id") == alert.alert_id or payload.get("event_id") == event.event_id or payload.get("request_event_id") == event.event_id:
+            related.append(
+                {
+                    "stage": "audit",
+                    "timestamp": entry.timestamp,
+                    "title": entry.action,
+                    "detail": entry.justification,
+                    "status": "queued" if "queue" in entry.action else "complete",
+                    "actor": entry.actor,
+                    "hash": entry.hash,
+                }
+            )
+    return sorted([*timeline, *related], key=lambda item: str(item["timestamp"]))
+
+
+def _copilot_answer(question: str, alert: Alert | None) -> dict:
+    q = question.lower()
+    if not alert:
+        live_count = len([row for row in ALERTS if row.event.metadata.get("source") == "live_traffic"])
+        return {
+            "answer": (
+                f"There are {live_count} live incidents in the current SOC feed. "
+                "Ask about a selected alert to get technique, risk, containment, and audit context."
+            ),
+            "evidence": ["No alert_id was supplied.", "Responses are defensive summaries only."],
+            "recommended_actions": ["Select an alert", "Review ATT&CK coverage", "Verify audit chain"],
+        }
+    scores = alert.event.metadata.get("model_scores", {}) if alert.event.metadata else {}
+    prediction = alert.event.metadata.get("prediction", {}) if alert.event.metadata else {}
+    primary = alert.attribution.techniques[0]
+    if "why" in q or "explain" in q:
+        answer = (
+            f"{alert.alert_id} was raised because {alert.event.event_type} on {alert.event.segment} exceeded the decision threshold. "
+            f"The primary ATT&CK mapping is {primary.id} {primary.name}. "
+            f"The predictive model's likely next stage is {prediction.get('predicted_next_stage', alert.attribution.likely_next_stage)}."
+        )
+    elif "mitigat" in q or "contain" in q or "block" in q:
+        answer = (
+            f"Containment is already staged for {alert.alert_id}: block the source {alert.event.ip}, preserve evidence, "
+            "revoke exposed sessions when identity abuse is involved, and require approval for high-blast-radius endpoint isolation."
+        )
+    elif "next" in q or "predict" in q:
+        answer = (
+            f"The most likely next stage is {prediction.get('predicted_next_stage', alert.attribution.likely_next_stage)}. "
+            "Prioritise controls that break that path before expanding containment."
+        )
+    else:
+        answer = (
+            f"{alert.alert_id}: {primary.id} {primary.name}, severity {alert.severity}, status {alert.status}. "
+            f"Decision score {scores.get('decision_score', alert.anomaly_score)}."
+        )
+    return {
+        "answer": answer,
+        "evidence": alert.attribution.evidence[:6],
+        "recommended_actions": [
+            "Confirm 403 enforcement for the source IP",
+            "Run or review the generated SOAR playbook",
+            "Check hash-chain audit verification",
+            "Review CVE queue for assets related to the observed ATT&CK technique",
+        ],
+    }
+
+
 def clone_demo_benign_event(template: TelemetryEvent) -> TelemetryEvent:
     now = datetime.now(timezone.utc)
     return template.model_copy(
@@ -691,6 +833,71 @@ def get_attribution(alert_id: str) -> dict:
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     return alert.attribution.model_dump()
+
+
+@app.get("/coverage/mitre")
+def mitre_coverage() -> dict:
+    techniques = attribution_agent.retriever.techniques
+    by_tactic: dict[str, dict] = {}
+    rows = []
+    for technique in techniques:
+        status, reason = _coverage_status(technique.id)
+        tactics = technique.tactics or ["uncategorized"]
+        rows.append(
+            {
+                "id": technique.id,
+                "name": technique.name,
+                "tactics": tactics,
+                "status": status,
+                "reason": reason,
+                "url": technique.url,
+            }
+        )
+        for tactic in tactics:
+            bucket = by_tactic.setdefault(
+                tactic,
+                {"tactic": tactic, "total": 0, "active_live": 0, "attribution_ready": 0, "needs_connector": 0},
+            )
+            bucket["total"] += 1
+            bucket[status] = bucket.get(status, 0) + 1
+    return {
+        "summary": {
+            "total": len(rows),
+            "active_live": sum(1 for row in rows if row["status"] == "active_live"),
+            "attribution_ready": sum(1 for row in rows if row["status"] == "attribution_ready"),
+            "needs_connector": sum(1 for row in rows if row["status"] == "needs_connector"),
+            "connectors": len(connector_catalog()),
+        },
+        "tactics": sorted(by_tactic.values(), key=lambda row: row["tactic"]),
+        "techniques": rows,
+    }
+
+
+@app.get("/incidents/{alert_id}/timeline")
+def incident_timeline(alert_id: str) -> dict:
+    alert = _alert_by_id(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"alert_id": alert_id, "items": _timeline_for_alert(alert)}
+
+
+@app.get("/integrations/connectors")
+def integrations_connectors() -> dict:
+    return {"items": connector_catalog()}
+
+
+@app.post("/copilot/ask")
+def ask_copilot(question: CopilotQuestion) -> dict:
+    alert = _alert_by_id(question.alert_id) if question.alert_id else None
+    answer = _copilot_answer(question.question, alert)
+    audit.append(
+        actor="soc_copilot",
+        action="answer_operator_question",
+        justification="Generated defensive SOC copilot summary from local alert context.",
+        blast_radius=0,
+        payload={"alert_id": question.alert_id, "question": question.question[:240]},
+    )
+    return answer
 
 
 @app.post("/playbooks/{alert_id}/run", dependencies=[OperatorAuth])

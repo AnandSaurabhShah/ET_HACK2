@@ -1,11 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { Database, Gauge, History, Radar, ShieldCheck, TimerReset } from "lucide-react";
-import { alertsEventSource, api, type AuditEntry, type PlaybookRun, type SocAlert, type SocMetricReport } from "../../lib/api";
+import {
+  alertsEventSource,
+  api,
+  type AuditEntry,
+  type ConnectorInfo,
+  type CopilotAnswer,
+  type IncidentTimeline,
+  type MitreCoverage,
+  type PlaybookRun,
+  type SocAlert,
+  type SocMetricReport,
+} from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
+import { ConnectorReadiness } from "./ConnectorReadiness";
 import { PlaybookConsole } from "./PlaybookConsole";
 import { CveQueue } from "./CveQueue";
 import { DigitalTwin } from "./DigitalTwin";
+import { IncidentTimeline as IncidentTimelinePanel } from "./IncidentTimeline";
+import { MitreCoverage as MitreCoveragePanel } from "./MitreCoverage";
+import { SocCopilot } from "./SocCopilot";
 
 function pct(n?: number) {
   return `${Math.round((n ?? 0) * 1000) / 10}%`;
@@ -33,24 +48,32 @@ export function SocDashboard() {
   const [cves, setCves] = useState<any[]>([]);
   const [graph, setGraph] = useState<any>(null);
   const [simulation, setSimulation] = useState<any>(null);
+  const [coverage, setCoverage] = useState<MitreCoverage | null>(null);
+  const [timeline, setTimeline] = useState<IncidentTimeline | null>(null);
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
+  const [copilot, setCopilot] = useState<CopilotAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
 
   async function refresh() {
     try {
-      const [reportRes, alertsRes, auditRes, cveRes, graphRes] = await Promise.all([
+      const [reportRes, alertsRes, auditRes, cveRes, graphRes, coverageRes, connectorRes] = await Promise.all([
         api.report(),
         api.alerts(),
         api.audit(),
         api.cves(),
         api.graph(),
+        api.coverage(),
+        api.connectors(),
       ]);
       setReport(reportRes);
       setAlerts(alertsRes.items);
       setAudit(auditRes.items);
       setCves(cveRes.items);
       setGraph(graphRes);
+      setCoverage(coverageRes);
+      setConnectors(connectorRes.items);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reach backend");
@@ -72,6 +95,14 @@ export function SocDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!selected?.alert_id) {
+      setTimeline(null);
+      return;
+    }
+    void api.timeline(selected.alert_id).then(setTimeline).catch(() => setTimeline(null));
+  }, [selected?.alert_id]);
+
   async function runPlaybook(alertId: string) {
     const run = await api.runPlaybook(alertId);
     setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
@@ -88,6 +119,12 @@ export function SocDashboard() {
 
   async function simulate() {
     setSimulation(await api.simulateTwin());
+    const auditRes = await api.audit();
+    setAudit(auditRes.items);
+  }
+
+  async function askCopilot(question: string) {
+    setCopilot(await api.askCopilot(question, selected?.alert_id));
     const auditRes = await api.audit();
     setAudit(auditRes.items);
   }
@@ -123,9 +160,13 @@ export function SocDashboard() {
       <div className="grid gap-5 lg:grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)]">
         <AnomalyFeed alerts={alerts} selectedId={selected?.alert_id} onSelect={(a) => setSelectedId(a.alert_id)} onRun={(id) => void runPlaybook(id)} />
         <div className="grid gap-4">
+          <MitreCoveragePanel coverage={coverage} />
           <AttackAttribution alert={selected} />
+          <IncidentTimelinePanel timeline={timeline} />
+          <SocCopilot alert={selected} answer={copilot} onAsk={askCopilot} />
           <PlaybookConsole runs={runs} onApprove={(id) => void approve(id)} />
           <CveQueue items={cves} />
+          <ConnectorReadiness items={connectors} />
           <DigitalTwin graph={graph} simulation={simulation} onSimulate={() => void simulate()} />
           <section className="rounded-sm border border-border/70 bg-card p-4">
             <h2 className="mb-3 text-[15px] font-semibold text-foreground">Hash-Chained Audit Trail</h2>

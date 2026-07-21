@@ -25,6 +25,11 @@ class RawEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CopilotQuestion(BaseModel):
+    question: str
+    alert_id: str | None = None
+
+
 class TelemetryEvent(RawEvent):
     event_id: str
     timestamp: datetime

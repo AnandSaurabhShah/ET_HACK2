@@ -59,6 +59,7 @@ One-command Windows demo:
 - ChromaDB persistence path for the ATT&CK corpus, with deterministic TF-IDF retrieval fallback for offline demos.
 - Hash-chained append-only audit log for every automated action.
 - `RESULTS.md` generated from the eval harness, not hand-entered metrics.
+- ATT&CK coverage heatmap, incident timeline replay, production connector readiness, and defensive SOC copilot in the dashboard.
 
 ## What's Real vs. Simulated
 
@@ -102,6 +103,7 @@ SIMULATED/MOCKED:
 Live request-layer detection is documented in [TESTING.md](./TESTING.md). It includes curl/PowerShell checks for SQL injection-shaped payloads, command injection-shaped payloads, path traversal, XSS, scanner User-Agents as supporting signals, endpoint enumeration, brute force, HTTP 403 block enforcement, and audit verification.
 
 Production deployment boundaries and required enterprise integrations are documented in [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md).
+Hackathon positioning, demo flow, and architecture are documented in [HACKATHON_PITCH.md](./HACKATHON_PITCH.md).
 
 ## MITRE Coverage
 
