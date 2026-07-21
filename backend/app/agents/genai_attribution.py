@@ -173,6 +173,14 @@ class GenAIAttributionProvider:
     ) -> AttributionDraft:
         if not techniques:
             return AttributionDraft()
+        if event.metadata.get("source") == "live_traffic":
+            return self._offline(
+                event,
+                score,
+                techniques,
+                risk,
+                reason="Live request path prioritised low-latency containment; SOC Copilot uses Ollama for on-demand GenAI reasoning.",
+            )
         if not self.available():
             return self._offline(event, score, techniques, risk)
 

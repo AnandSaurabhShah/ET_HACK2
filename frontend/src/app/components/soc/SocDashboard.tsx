@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Database, Gauge, History, LockKeyhole, Radar, ShieldCheck, TimerReset, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Database, Gauge, LockKeyhole, Radio, ShieldCheck, TimerReset, Zap } from "lucide-react";
 import {
   alertsEventSource,
   api,
@@ -26,6 +26,26 @@ import { ZeroDayPrevention } from "./ZeroDayPrevention";
 
 function pct(n?: number) {
   return `${Math.round((n ?? 0) * 1000) / 10}%`;
+}
+
+function displayScore(alert?: SocAlert) {
+  const scores = alert?.event.metadata?.model_scores as Record<string, number> | undefined;
+  return scores?.decision_score ?? alert?.anomaly_score ?? 0;
+}
+
+function requestBytes(alert?: SocAlert) {
+  if (!alert) return 0;
+  return Number(alert.event.metadata?.request_size ?? alert.event.bytes_out ?? 0);
+}
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${Math.round(value)} B`;
+}
+
+function avg(rows: number[]) {
+  return rows.length ? rows.reduce((sum, value) => sum + value, 0) / rows.length : 0;
 }
 
 function Metric({ icon: Icon, label, value, sub }: { icon: typeof Gauge; label: string; value: string; sub: string }) {
@@ -67,10 +87,62 @@ export function SocDashboard() {
   const [copilot, setCopilot] = useState<CopilotAnswer | null>(null);
   const [zeroDayStrategy, setZeroDayStrategy] = useState<ZeroDayStrategy | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streamState, setStreamState] = useState<"connecting" | "live" | "retrying">("connecting");
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [livePulse, setLivePulse] = useState(0);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
+  const selectedIdRef = useRef<string | undefined>();
 
-  async function refresh() {
+  useEffect(() => {
+    selectedIdRef.current = selected?.alert_id;
+  }, [selected?.alert_id]);
+
+  const liveStats = useMemo(() => {
+    const scores = alerts.map(displayScore);
+    const latencies = alerts.map((alert) => alert.event.latency_ms);
+    const bytes = alerts.map(requestBytes);
+    const critical = alerts.filter((alert) => alert.severity === "critical").length;
+    const contained = alerts.filter((alert) => alert.status === "contained" || alert.status === "queued").length;
+    const techniques = new Set(alerts.flatMap((alert) => alert.attribution.techniques.map((technique) => technique.id)));
+    return {
+      count: alerts.length,
+      avgScore: avg(scores),
+      avgLatency: avg(latencies),
+      avgBytes: avg(bytes),
+      critical,
+      contained,
+      techniques: techniques.size,
+      latest: alerts[0],
+    };
+  }, [alerts]);
+
+  const refreshDynamic = useCallback(async (timelineAlertId?: string) => {
+    try {
+      const [alertsRes, auditRes, cveRes, graphRes] = await Promise.all([
+        api.alerts(),
+        api.audit(),
+        api.cves(),
+        api.graph(),
+      ]);
+      setAlerts(alertsRes.items);
+      setAudit(auditRes.items);
+      setCves(cveRes.items);
+      setGraph(graphRes);
+      const nextTimelineAlertId = timelineAlertId ?? selectedIdRef.current ?? alertsRes.items[0]?.alert_id;
+      if (nextTimelineAlertId) {
+        setTimeline(await api.timeline(nextTimelineAlertId));
+      } else {
+        setTimeline(null);
+      }
+      setLastRefresh(new Date());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reach backend");
+    }
+  }, []);
+
+  const refresh = useCallback(async () => {
     try {
       const [reportRes, alertsRes, auditRes, cveRes, graphRes, coverageRes, connectorRes, zeroDayRes] = await Promise.all([
         api.report(),
@@ -90,11 +162,18 @@ export function SocDashboard() {
       setCoverage(coverageRes);
       setConnectors(connectorRes.items);
       setZeroDayStrategy(zeroDayRes);
+      const nextTimelineAlertId = selectedIdRef.current ?? alertsRes.items[0]?.alert_id;
+      if (nextTimelineAlertId) {
+        setTimeline(await api.timeline(nextTimelineAlertId));
+      } else {
+        setTimeline(null);
+      }
+      setLastRefresh(new Date());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reach backend");
     }
-  }
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -103,30 +182,43 @@ export function SocDashboard() {
     const connect = () => {
       events?.close();
       events = alertsEventSource();
+      setStreamState("connecting");
+      events.onopen = () => setStreamState("live");
       events.addEventListener("alert", (event) => {
         const alert = JSON.parse((event as MessageEvent).data) as SocAlert;
         setAlerts((current) => [alert, ...current.filter((item) => item.alert_id !== alert.alert_id)].slice(0, 30));
+        setSelectedId(alert.alert_id);
+        setCopilot(null);
+        setLivePulse((current) => current + 1);
+        setLastRefresh(new Date());
+        void refreshDynamic(alert.alert_id);
       });
       events.onerror = () => {
+        setStreamState("retrying");
         events?.close();
         reconnect = window.setTimeout(connect, 2500);
       };
     };
     connect();
-    const timer = window.setInterval(() => void refresh(), 15000);
+    const dynamicTimer = window.setInterval(() => void refreshDynamic(selectedIdRef.current), 5000);
+    const staticTimer = window.setInterval(() => void refresh(), 60000);
     return () => {
       events?.close();
       if (reconnect) window.clearTimeout(reconnect);
-      window.clearInterval(timer);
+      window.clearInterval(dynamicTimer);
+      window.clearInterval(staticTimer);
     };
-  }, []);
+  }, [refresh, refreshDynamic]);
 
   useEffect(() => {
     if (!selected?.alert_id) {
       setTimeline(null);
       return;
     }
-    void api.timeline(selected.alert_id).then(setTimeline).catch(() => setTimeline(null));
+    void api.timeline(selected.alert_id).then((nextTimeline) => {
+      setTimeline(nextTimeline);
+      setLastRefresh(new Date());
+    }).catch(() => setTimeline(null));
   }, [selected?.alert_id]);
 
   async function runPlaybook(alertId: string) {
@@ -134,6 +226,7 @@ export function SocDashboard() {
     setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
     const auditRes = await api.audit();
     setAudit(auditRes.items);
+    await refreshDynamic(alertId);
   }
 
   async function approve(runId: string) {
@@ -141,18 +234,21 @@ export function SocDashboard() {
     setRuns((current) => current.map((item) => (item.run_id === runId ? run : item)));
     const auditRes = await api.audit();
     setAudit(auditRes.items);
+    await refreshDynamic(selected?.alert_id);
   }
 
   async function simulate() {
     setSimulation(await api.simulateTwin());
     const auditRes = await api.audit();
     setAudit(auditRes.items);
+    await refreshDynamic(selected?.alert_id);
   }
 
   async function askCopilot(question: string) {
     setCopilot(await api.askCopilot(question, selected?.alert_id));
     const auditRes = await api.audit();
     setAudit(auditRes.items);
+    setLastRefresh(new Date());
   }
 
   return (
@@ -168,7 +264,7 @@ export function SocDashboard() {
           </p>
         </div>
         <span className="rounded-sm border border-border/70 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
-          API {api.base}
+          {streamState.toUpperCase()} - API {api.base}
         </span>
       </div>
 
@@ -181,12 +277,17 @@ export function SocDashboard() {
       {error && <div className="mb-4 rounded-sm border border-accent bg-accent/5 p-3 text-[13px] text-foreground">Backend unavailable: {error}</div>}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <Metric icon={Radar} label="Detection" value={pct(report?.detection_rate)} sub={`${report?.alert_count ?? 0} eval alerts`} />
-        <Metric icon={Gauge} label="False Positive" value={pct(report?.false_positive_rate)} sub="eval harness" />
-        <Metric icon={ShieldCheck} label="ATT&CK Accuracy" value={pct(report?.attack_technique_accuracy)} sub={`${report?.mitre_technique_count ?? 0} MITRE techniques`} />
-        <Metric icon={TimerReset} label="MTTD" value={`${report?.mttd_minutes ?? 0}m`} sub={`${report?.mttd_improvement ?? 0}x faster`} />
-        <Metric icon={History} label="MTTR" value={`${report?.mttr_minutes ?? 0}m`} sub={`${report?.mttr_improvement ?? 0}x faster`} />
-        <Metric icon={Database} label="Autonomous" value={`${report?.autonomous_playbook_percent ?? 0}%`} sub="playbook steps" />
+        <Metric icon={Radio} label="Live Alerts" value={`${liveStats.count}`} sub={`pulse ${livePulse} - ${streamState}`} />
+        <Metric icon={Gauge} label="Avg Risk Score" value={pct(liveStats.avgScore)} sub={liveStats.latest ? `${liveStats.latest.alert_id} latest` : "waiting for live attack"} />
+        <Metric icon={TimerReset} label="Avg Latency" value={`${Math.round(liveStats.avgLatency)}ms`} sub={liveStats.latest ? `${Math.round(liveStats.latest.event.latency_ms)}ms latest` : "live request timing"} />
+        <Metric icon={Database} label="Avg Req Bytes" value={formatBytes(liveStats.avgBytes)} sub={liveStats.latest ? `${formatBytes(requestBytes(liveStats.latest))} latest` : "live request size"} />
+        <Metric icon={ShieldCheck} label="Critical" value={`${liveStats.critical}`} sub={`${liveStats.techniques} ATT&CK techniques`} />
+        <Metric icon={Activity} label="Contained/Queued" value={`${liveStats.contained}`} sub={`baseline ${pct(report?.detection_rate)} detection`} />
+      </div>
+
+      <div className="mb-5 rounded-sm border border-border/70 bg-card px-3 py-2 text-[12px] text-muted-foreground">
+        Last live sync: {lastRefresh ? lastRefresh.toLocaleTimeString() : "waiting"} - Alerts, attribution, timeline, CVE queue,
+        digital twin, audit trail, and metrics refresh from the same live backend data.
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)]">

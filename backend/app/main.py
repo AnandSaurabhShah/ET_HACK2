@@ -70,6 +70,7 @@ LOCAL_SOC_READ_PREFIXES = (
     "/twin/graph",
     "/demo/status",
     "/coverage",
+    "/prevention",
     "/integrations",
     "/incidents",
 )
@@ -107,7 +108,7 @@ def client_ip(request: Request) -> str:
 
 
 def _allow_local_blocked_soc_read(request: Request, ip: str, path: str) -> bool:
-    if request.method != "GET":
+    if request.method not in {"GET", "OPTIONS"}:
         return False
     if request.headers.get("x-forwarded-for"):
         return False
@@ -277,6 +278,8 @@ async def live_request_detection_middleware(request: Request, call_next):
     start = time.perf_counter()
     path = request.url.path
     ip = client_ip(request)
+    if _allow_local_blocked_soc_read(request, ip, path):
+        return await call_next(request)
     if GLOBAL_BLOCKLIST.is_blocked(ip) and not _allow_local_blocked_soc_read(request, ip, path):
         body = await request.body()
         body_text = _maybe_parse_body(body, request.headers.get("content-type", ""))
