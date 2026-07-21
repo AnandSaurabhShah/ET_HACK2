@@ -276,6 +276,16 @@ async def live_request_detection_middleware(request: Request, call_next):
     path = request.url.path
     ip = client_ip(request)
     if GLOBAL_BLOCKLIST.is_blocked(ip) and not _allow_local_blocked_soc_read(request, ip, path):
+        body = await request.body()
+        body_text = _maybe_parse_body(body, request.headers.get("content-type", ""))
+        header_size = _headers_size(request)
+        request_size = header_size + len(body) + len(str(request.url.query or ""))
+        user_agent = request.headers.get("user-agent", "")
+        user_id, role = _extract_auth_context(request, body_text)
+        request_text = _captured_text(request, body_text)
+        signature_matches = [
+            match for match in scan_request(request_text, user_agent, header_size, len(body)) if match.family != "scanner_user_agent"
+        ]
         audit.append(
             actor="perimeter_middleware",
             action="reject_blocked_ip",
@@ -283,6 +293,30 @@ async def live_request_detection_middleware(request: Request, call_next):
             blast_radius=0,
             payload={"ip": ip, "route": path, "method": request.method},
         )
+        if signature_matches:
+            signal = signature_matches[0]
+            event = _signal_to_event(
+                request=request,
+                ip=ip,
+                method=request.method,
+                path=path,
+                status_code=403,
+                latency_ms=(time.perf_counter() - start) * 1000,
+                response_size=len(DENY_MESSAGE.encode("utf-8")),
+                request_size=request_size,
+                header_size=header_size,
+                body_size=len(body),
+                body_text=body_text,
+                user_agent=user_agent,
+                user_id=user_id,
+                role=role,
+                signal=signal,
+                source="live_traffic",
+            )
+            event.metadata["repeat_blocked_attack"] = True
+            result = process_telemetry_event(event)
+            if result.get("alert_id"):
+                run_orchestrator_for_alert(result["alert_id"], "perimeter_middleware")
         return PlainTextResponse(DENY_MESSAGE, status_code=403)
 
     if any(path.startswith(prefix) for prefix in MIDDLEWARE_SKIP_PREFIXES):

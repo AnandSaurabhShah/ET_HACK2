@@ -82,15 +82,25 @@ export function SocDashboard() {
 
   useEffect(() => {
     void refresh();
-    const events = alertsEventSource();
-    events.addEventListener("alert", (event) => {
-      const alert = JSON.parse((event as MessageEvent).data) as SocAlert;
-      setAlerts((current) => [alert, ...current.filter((item) => item.alert_id !== alert.alert_id)].slice(0, 30));
-    });
-    events.onerror = () => events.close();
+    let events: EventSource | null = null;
+    let reconnect: number | undefined;
+    const connect = () => {
+      events?.close();
+      events = alertsEventSource();
+      events.addEventListener("alert", (event) => {
+        const alert = JSON.parse((event as MessageEvent).data) as SocAlert;
+        setAlerts((current) => [alert, ...current.filter((item) => item.alert_id !== alert.alert_id)].slice(0, 30));
+      });
+      events.onerror = () => {
+        events?.close();
+        reconnect = window.setTimeout(connect, 2500);
+      };
+    };
+    connect();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => {
-      events.close();
+      events?.close();
+      if (reconnect) window.clearTimeout(reconnect);
       window.clearInterval(timer);
     };
   }, []);

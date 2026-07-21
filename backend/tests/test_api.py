@@ -119,3 +119,19 @@ def test_localhost_block_does_not_break_soc_read_dashboard() -> None:
         assert client.get("/ready").status_code == 200
         assert client.get("/coverage/mitre").status_code == 200
         assert client.get("/integrations/connectors").status_code == 200
+
+
+def test_repeat_attack_from_blocked_ip_still_creates_live_alert() -> None:
+    with TestClient(app) as client:
+        first = client.get("/health?q=' OR '1'='1")
+        assert first.status_code == 403
+        before = client.get("/alerts?source=live_traffic&limit=50").json()["total"]
+
+        repeat = client.get("/health?cmd=;whoami")
+        assert repeat.status_code == 403
+
+        after_response = client.get("/alerts?source=live_traffic&limit=50")
+        assert after_response.status_code == 200
+        assert after_response.json()["total"] > before
+        latest = after_response.json()["items"][0]
+        assert latest["event"]["metadata"]["repeat_blocked_attack"] is True
