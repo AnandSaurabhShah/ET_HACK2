@@ -40,20 +40,30 @@ The dashboard stores both in `event.metadata.model_scores`.
 
 ## GenAI Attribution
 
-Default mode is safe offline fallback:
+Default mode is the local Ollama-backed Aegis model:
 
 ```env
-AEGIS_GENAI_PROVIDER=offline
+AEGIS_GENAI_PROVIDER=ollama
+AEGIS_GENAI_ENDPOINT=http://127.0.0.1:11434/api/generate
+AEGIS_GENAI_MODEL=aegis-cni:latest
 ```
 
-To enable an OpenAI-compatible chat-completions provider:
+Create the model with:
+
+```powershell
+.\scripts\create_ollama_model.ps1
+```
+
+This is a project-tuned Ollama model built from `ollama/Modelfile` with defensive system instructions and SOC examples. True weight fine-tuning can be added later by training a LoRA/adapter externally and referencing it from the Modelfile.
+
+To use an OpenAI-compatible chat-completions provider instead:
 
 ```env
 AEGIS_GENAI_PROVIDER=openai-compatible
 AEGIS_GENAI_ENDPOINT=https://api.openai.com/v1/chat/completions
 AEGIS_GENAI_MODEL=gpt-4.1-mini
 AEGIS_GENAI_API_KEY=your-key
-AEGIS_GENAI_TIMEOUT_SECONDS=8
+AEGIS_GENAI_TIMEOUT_SECONDS=30
 ```
 
 The prompt is defensive-only and asks for strict JSON:

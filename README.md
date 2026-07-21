@@ -13,6 +13,14 @@ python seed.py
 uvicorn app.main:app --reload
 ```
 
+Optional local GenAI model:
+
+```powershell
+.\scripts\create_ollama_model.ps1
+```
+
+This creates `aegis-cni:latest` in Ollama from `ollama/Modelfile`. The backend defaults to `AEGIS_GENAI_PROVIDER=ollama` and uses `http://127.0.0.1:11434/api/generate`; if Ollama is not running, it falls back to deterministic defensive attribution so the SOC stays available.
+
 Production-shaped local stack:
 
 ```bash
@@ -56,6 +64,7 @@ One-command Windows demo:
 - Predictive risk engine using gradient-boosted attack probability, rare transition modelling, and entity pressure features.
 - Local ATT&CK corpus built from MITRE Enterprise ATT&CK STIX JSON, distilled to non-deprecated attack techniques and mitigation relationships.
 - GenAI attribution boundary for defensive evidence synthesis, likely next-stage prediction, and recommendations, with deterministic offline fallback.
+- Local Ollama Aegis model package (`ollama/Modelfile`) for defensive attribution and SOC copilot responses.
 - ChromaDB persistence path for the ATT&CK corpus, with deterministic TF-IDF retrieval fallback for offline demos.
 - Hash-chained append-only audit log for every automated action.
 - `RESULTS.md` generated from the eval harness, not hand-entered metrics.

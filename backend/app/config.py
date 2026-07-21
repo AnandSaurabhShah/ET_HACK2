@@ -21,11 +21,11 @@ class Settings(BaseSettings):
     perimeter_block_cooldown_seconds: int = Field(default=900, alias="AEGIS_PERIMETER_BLOCK_COOLDOWN_SECONDS")
     demo_background_enabled: bool = Field(default=False, alias="AEGIS_DEMO_BACKGROUND_ENABLED")
     predictive_risk_threshold: float = Field(default=0.58, alias="AEGIS_PREDICTIVE_RISK_THRESHOLD")
-    genai_provider: str = Field(default="offline", alias="AEGIS_GENAI_PROVIDER")
-    genai_endpoint: str = Field(default="https://api.openai.com/v1/chat/completions", alias="AEGIS_GENAI_ENDPOINT")
-    genai_model: str = Field(default="gpt-4.1-mini", alias="AEGIS_GENAI_MODEL")
+    genai_provider: str = Field(default="ollama", alias="AEGIS_GENAI_PROVIDER")
+    genai_endpoint: str = Field(default="http://127.0.0.1:11434/api/generate", alias="AEGIS_GENAI_ENDPOINT")
+    genai_model: str = Field(default="aegis-cni:latest", alias="AEGIS_GENAI_MODEL")
     genai_api_key: str | None = Field(default=None, alias="AEGIS_GENAI_API_KEY")
-    genai_timeout_seconds: float = Field(default=8.0, alias="AEGIS_GENAI_TIMEOUT_SECONDS")
+    genai_timeout_seconds: float = Field(default=30.0, alias="AEGIS_GENAI_TIMEOUT_SECONDS")
 
     @property
     def cors_origin_list(self) -> list[str]:

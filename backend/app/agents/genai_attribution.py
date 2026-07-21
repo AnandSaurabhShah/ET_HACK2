@@ -22,7 +22,104 @@ class GenAIAttributionProvider:
         self.settings = get_settings()
 
     def available(self) -> bool:
-        return self.settings.genai_provider.lower() not in {"", "offline", "disabled"} and bool(self.settings.genai_api_key)
+        provider = self.settings.genai_provider.lower()
+        if provider == "ollama":
+            return bool(self.settings.genai_endpoint and self.settings.genai_model)
+        return provider not in {"", "offline", "disabled"} and bool(self.settings.genai_api_key)
+
+    def _system_prompt(self) -> str:
+        return (
+            "You are Aegis-CNI, a defensive GenAI SOC analyst for Indian critical exam infrastructure. "
+            "Return strict JSON only. Use MITRE ATT&CK evidence, predictive-risk signals, and audit-aware recommendations. "
+            "Never provide exploit instructions, payload construction, malware steps, credential theft steps, or offensive playbooks. "
+            "Focus on detection explanation, likely next-stage prediction, containment, verification, and recovery."
+        )
+
+    def _prompt(
+        self,
+        *,
+        event: TelemetryEvent,
+        score: float,
+        techniques: list[MitreTechnique],
+        risk: dict | None,
+    ) -> dict:
+        return {
+            "task": "Generate defensive SOC attribution only.",
+            "event": {
+                "event_type": event.event_type,
+                "segment": event.segment,
+                "role": event.role,
+                "success": event.success,
+                "metadata": event.metadata,
+            },
+            "score": score,
+            "predictive_risk": risk or {},
+            "techniques": [
+                {"id": t.id, "name": t.name, "tactics": t.tactics, "mitigations": t.mitigations[:5]}
+                for t in techniques[:3]
+            ],
+            "required_json_keys": ["evidence", "likely_next_stage", "recommendation"],
+        }
+
+    def _draft_from_parsed(self, parsed: dict, provider: str, primary: MitreTechnique) -> AttributionDraft:
+        evidence = parsed.get("evidence") or []
+        return AttributionDraft(
+            evidence=[str(item) for item in evidence][:8],
+            likely_next_stage=str(parsed.get("likely_next_stage") or "credential validation and lateral movement"),
+            recommendation=str(
+                parsed.get("recommendation")
+                or f"Apply mitigations for {primary.id} and execute approved containment."
+            ),
+            provider=provider,
+        )
+
+    def _generate_ollama(self, prompt: dict, primary: MitreTechnique) -> AttributionDraft:
+        payload = {
+            "model": self.settings.genai_model,
+            "system": self._system_prompt(),
+            "prompt": json.dumps(prompt, default=str),
+            "stream": False,
+            "format": "json",
+            "keep_alive": "30m",
+            "options": {"temperature": 0.15, "num_predict": 700},
+        }
+        request = urllib.request.Request(
+            self.settings.genai_endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        parsed = json.loads(body.get("response") or "{}")
+        return self._draft_from_parsed(parsed, f"ollama:{self.settings.genai_model}", primary)
+
+    def warm_up(self) -> bool:
+        if self.settings.genai_provider.lower() != "ollama" or not self.available():
+            return False
+        payload = {
+            "model": self.settings.genai_model,
+            "system": self._system_prompt(),
+            "prompt": json.dumps({"task": "warm_up", "required_json_keys": ["ok"]}),
+            "stream": False,
+            "format": "json",
+            "keep_alive": "30m",
+            "options": {"temperature": 0.0, "num_predict": 32},
+        }
+        request = urllib.request.Request(
+            self.settings.genai_endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        timeout = max(20.0, min(90.0, self.settings.genai_timeout_seconds * 8))
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            json.loads(body.get("response") or "{}")
+            return True
+        except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError):
+            return False
 
     def _offline(
         self,
@@ -80,32 +177,19 @@ class GenAIAttributionProvider:
             return self._offline(event, score, techniques, risk)
 
         primary = techniques[0]
-        prompt = {
-            "task": "Generate defensive SOC attribution only. Do not provide exploit steps or offensive instructions.",
-            "event": {
-                "event_type": event.event_type,
-                "segment": event.segment,
-                "role": event.role,
-                "success": event.success,
-                "metadata": event.metadata,
-            },
-            "score": score,
-            "predictive_risk": risk or {},
-            "techniques": [
-                {"id": t.id, "name": t.name, "tactics": t.tactics, "mitigations": t.mitigations[:5]}
-                for t in techniques[:3]
-            ],
-            "required_json_keys": ["evidence", "likely_next_stage", "recommendation"],
-        }
+        prompt = self._prompt(event=event, score=score, techniques=techniques, risk=risk)
+        if self.settings.genai_provider.lower() == "ollama":
+            try:
+                return self._generate_ollama(prompt, primary)
+            except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                return self._offline(event, score, techniques, risk, reason=f"Ollama unavailable or invalid JSON: {exc}")
+
         payload = {
             "model": self.settings.genai_model,
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a defensive cyber SOC attribution analyst. "
-                        "Return strict JSON only. Keep recommendations defensive, auditable, and non-offensive."
-                    ),
+                    "content": self._system_prompt(),
                 },
                 {"role": "user", "content": json.dumps(prompt, default=str)},
             ],
@@ -126,15 +210,47 @@ class GenAIAttributionProvider:
                 body = json.loads(response.read().decode("utf-8"))
             content = body["choices"][0]["message"]["content"]
             parsed = json.loads(content)
-            evidence = parsed.get("evidence") or []
-            return AttributionDraft(
-                evidence=[str(item) for item in evidence][:8],
-                likely_next_stage=str(parsed.get("likely_next_stage") or "credential validation and lateral movement"),
-                recommendation=str(
-                    parsed.get("recommendation")
-                    or f"Apply mitigations for {primary.id} and execute approved containment."
-                ),
-                provider=self.settings.genai_provider,
-            )
+            return self._draft_from_parsed(parsed, self.settings.genai_provider, primary)
         except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
             return self._offline(event, score, techniques, risk, reason=str(exc))
+
+    def answer_copilot(self, *, question: str, context: dict, fallback: dict) -> dict:
+        if not self.available():
+            return fallback
+        prompt = {
+            "task": "Answer a SOC operator question using only defensive incident context.",
+            "question": question,
+            "context": context,
+            "required_json_keys": ["answer", "evidence", "recommended_actions"],
+        }
+        if self.settings.genai_provider.lower() == "ollama":
+            payload = {
+                "model": self.settings.genai_model,
+                "system": self._system_prompt(),
+                "prompt": json.dumps(prompt, default=str),
+                "stream": False,
+                "format": "json",
+                "keep_alive": "30m",
+                "options": {"temperature": 0.2, "num_predict": 600},
+            }
+            request = urllib.request.Request(
+                self.settings.genai_endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                parsed = json.loads(body.get("response") or "{}")
+                return {
+                    "answer": str(parsed.get("answer") or fallback["answer"]),
+                    "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
+                    "recommended_actions": [
+                        str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
+                    ][:6],
+                    "provider": f"ollama:{self.settings.genai_model}",
+                }
+            except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                return {**fallback, "provider": "offline", "fallback_reason": f"Ollama unavailable or invalid JSON: {exc}"}
+        return fallback

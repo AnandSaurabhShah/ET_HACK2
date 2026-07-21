@@ -110,6 +110,8 @@ export interface CopilotAnswer {
   answer: string;
   evidence: string[];
   recommended_actions: string[];
+  provider?: string;
+  fallback_reason?: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

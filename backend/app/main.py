@@ -54,6 +54,7 @@ graph_agent = GraphAgent()
 EVENTS: list[TelemetryEvent] = []
 ALERTS: list[Alert] = []
 DEMO_TASK: asyncio.Task | None = None
+GENAI_WARMUP_TASK: asyncio.Task | None = None
 DEMO_PAUSED = False
 DEMO_NORMAL_POOL: list[TelemetryEvent] = []
 DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
@@ -400,7 +401,7 @@ async def live_request_detection_middleware(request: Request, call_next):
 async def startup() -> None:
     ensure_dirs()
     init_db()
-    global EVENTS, ALERTS, DEMO_TASK, DEMO_NORMAL_POOL
+    global EVENTS, ALERTS, DEMO_TASK, DEMO_NORMAL_POOL, GENAI_WARMUP_TASK
     EVENTS = _load_events()
     anomaly_agent.fit(EVENTS)
     risk_agent.fit(EVENTS)
@@ -409,6 +410,8 @@ async def startup() -> None:
         ALERTS = build_alerts(EVENTS, anomaly_agent, attribution_agent)
         write_json(ALERTS_PATH, [a.model_dump() for a in ALERTS])
     refresh_nvd_cache(force=False)
+    if attribution_agent.genai.available():
+        GENAI_WARMUP_TASK = asyncio.create_task(asyncio.to_thread(attribution_agent.genai.warm_up))
     sync_events([event.model_dump() for event in EVENTS])
     sync_alerts([alert.model_dump() for alert in ALERTS])
     if settings.demo_background_enabled:
@@ -419,7 +422,10 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global DEMO_TASK
+    global DEMO_TASK, GENAI_WARMUP_TASK
+    if GENAI_WARMUP_TASK and not GENAI_WARMUP_TASK.done():
+        GENAI_WARMUP_TASK.cancel()
+    GENAI_WARMUP_TASK = None
     if DEMO_TASK:
         DEMO_TASK.cancel()
         try:
@@ -631,14 +637,20 @@ def _copilot_answer(question: str, alert: Alert | None) -> dict:
     q = question.lower()
     if not alert:
         live_count = len([row for row in ALERTS if row.event.metadata.get("source") == "live_traffic"])
-        return {
+        fallback = {
             "answer": (
                 f"There are {live_count} live incidents in the current SOC feed. "
                 "Ask about a selected alert to get technique, risk, containment, and audit context."
             ),
             "evidence": ["No alert_id was supplied.", "Responses are defensive summaries only."],
             "recommended_actions": ["Select an alert", "Review ATT&CK coverage", "Verify audit chain"],
+            "provider": "offline",
         }
+        return attribution_agent.genai.answer_copilot(
+            question=question,
+            context={"live_incident_count": live_count, "selected_alert": None},
+            fallback=fallback,
+        )
     scores = alert.event.metadata.get("model_scores", {}) if alert.event.metadata else {}
     prediction = alert.event.metadata.get("prediction", {}) if alert.event.metadata else {}
     primary = alert.attribution.techniques[0]
@@ -663,7 +675,7 @@ def _copilot_answer(question: str, alert: Alert | None) -> dict:
             f"{alert.alert_id}: {primary.id} {primary.name}, severity {alert.severity}, status {alert.status}. "
             f"Decision score {scores.get('decision_score', alert.anomaly_score)}."
         )
-    return {
+    fallback = {
         "answer": answer,
         "evidence": alert.attribution.evidence[:6],
         "recommended_actions": [
@@ -672,7 +684,21 @@ def _copilot_answer(question: str, alert: Alert | None) -> dict:
             "Check hash-chain audit verification",
             "Review CVE queue for assets related to the observed ATT&CK technique",
         ],
+        "provider": "offline",
     }
+    context = {
+        "alert_id": alert.alert_id,
+        "event_type": alert.event.event_type,
+        "severity": alert.severity,
+        "status": alert.status,
+        "source_ip": alert.event.ip,
+        "technique": primary.model_dump(),
+        "scores": scores,
+        "prediction": prediction,
+        "attribution_evidence": alert.attribution.evidence[:6],
+        "recommendation": alert.attribution.recommendation,
+    }
+    return attribution_agent.genai.answer_copilot(question=question, context=context, fallback=fallback)
 
 
 def clone_demo_benign_event(template: TelemetryEvent) -> TelemetryEvent:
