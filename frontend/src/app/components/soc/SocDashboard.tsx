@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Database, Gauge, History, Radar, ShieldCheck, TimerReset } from "lucide-react";
+import { Database, Gauge, History, LockKeyhole, Radar, ShieldCheck, TimerReset, Zap } from "lucide-react";
 import {
   alertsEventSource,
   api,
@@ -37,6 +37,17 @@ function Metric({ icon: Icon, label, value, sub }: { icon: typeof Gauge; label: 
       </div>
       <div className="mt-2 font-mono text-[20px] text-foreground">{value}</div>
       <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>
+    </div>
+  );
+}
+
+function Capability({ icon: Icon, title, text }: { icon: typeof Gauge; title: string; text: string }) {
+  return (
+    <div className="rounded-sm border border-border/70 bg-card p-3">
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+        <Icon className="size-4 text-primary" /> {title}
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{text}</p>
     </div>
   );
 }
@@ -159,6 +170,12 @@ export function SocDashboard() {
         <span className="rounded-sm border border-border/70 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
           API {api.base}
         </span>
+      </div>
+
+      <div className="mb-5 grid gap-3 md:grid-cols-3">
+        <Capability icon={Zap} title="Live-Only Attack Surface" text="The dashboard defaults to live terminal/API attacks, not looping sample noise. Manual simulations remain explicit." />
+        <Capability icon={ShieldCheck} title="Prediction Before Known CVE" text="Behavioural ML scores rare sequences and unknown exploit patterns before a database match exists." />
+        <Capability icon={LockKeyhole} title="Mitigation With Audit" text="High-confidence sources are blocked, risky actions require approval, and every response is hash-chained." />
       </div>
 
       {error && <div className="mb-4 rounded-sm border border-accent bg-accent/5 p-3 text-[13px] text-foreground">Backend unavailable: {error}</div>}
