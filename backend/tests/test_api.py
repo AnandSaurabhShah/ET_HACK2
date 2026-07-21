@@ -58,6 +58,10 @@ def test_core_read_endpoints() -> None:
         connectors = client.get("/integrations/connectors")
         assert connectors.status_code == 200
         assert len(connectors.json()["items"]) >= 5
+        zero_day = client.get("/prevention/zero-day")
+        assert zero_day.status_code == 200
+        assert len(zero_day.json()["lifecycle"]) >= 4
+        assert any("T1190" in item for item in zero_day.json()["mitre_focus"])
         assert client.get("/demo/status").status_code == 200
         assert client.get("/demo/status").json()["enabled"] is False
         paused = client.post("/demo/pause")

@@ -32,6 +32,7 @@ from app.paths import ALERTS_PATH, EVAL_REPORT_PATH, EVENTS_PATH, ensure_dirs
 from app.storage import append_jsonl, read_json, read_jsonl, utc_now, write_json, write_jsonl
 from app.security import GLOBAL_BLOCKLIST, GLOBAL_RATE_TRACKER, OperatorAuth, RateSignal, check_ingest_rate_limit
 from app.security.signatures import SignatureMatch, scan_request
+from app.agents.zero_day_strategy import zero_day_prevention_strategy
 
 
 app = FastAPI(title="Aegis-CNI Behavioural Resilience API", version="0.1.0")
@@ -931,6 +932,11 @@ def mitre_coverage() -> dict:
         "tactics": sorted(by_tactic.values(), key=lambda row: row["tactic"]),
         "techniques": rows,
     }
+
+
+@app.get("/prevention/zero-day")
+def zero_day_prevention() -> dict:
+    return zero_day_prevention_strategy()
 
 
 @app.get("/incidents/{alert_id}/timeline")

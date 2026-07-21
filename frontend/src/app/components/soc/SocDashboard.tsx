@@ -11,6 +11,7 @@ import {
   type PlaybookRun,
   type SocAlert,
   type SocMetricReport,
+  type ZeroDayStrategy,
 } from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
@@ -21,6 +22,7 @@ import { DigitalTwin } from "./DigitalTwin";
 import { IncidentTimeline as IncidentTimelinePanel } from "./IncidentTimeline";
 import { MitreCoverage as MitreCoveragePanel } from "./MitreCoverage";
 import { SocCopilot } from "./SocCopilot";
+import { ZeroDayPrevention } from "./ZeroDayPrevention";
 
 function pct(n?: number) {
   return `${Math.round((n ?? 0) * 1000) / 10}%`;
@@ -52,13 +54,14 @@ export function SocDashboard() {
   const [timeline, setTimeline] = useState<IncidentTimeline | null>(null);
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [copilot, setCopilot] = useState<CopilotAnswer | null>(null);
+  const [zeroDayStrategy, setZeroDayStrategy] = useState<ZeroDayStrategy | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selected = useMemo(() => alerts.find((a) => a.alert_id === selectedId) ?? alerts[0], [alerts, selectedId]);
 
   async function refresh() {
     try {
-      const [reportRes, alertsRes, auditRes, cveRes, graphRes, coverageRes, connectorRes] = await Promise.all([
+      const [reportRes, alertsRes, auditRes, cveRes, graphRes, coverageRes, connectorRes, zeroDayRes] = await Promise.all([
         api.report(),
         api.alerts(),
         api.audit(),
@@ -66,6 +69,7 @@ export function SocDashboard() {
         api.graph(),
         api.coverage(),
         api.connectors(),
+        api.zeroDayStrategy(),
       ]);
       setReport(reportRes);
       setAlerts(alertsRes.items);
@@ -74,6 +78,7 @@ export function SocDashboard() {
       setGraph(graphRes);
       setCoverage(coverageRes);
       setConnectors(connectorRes.items);
+      setZeroDayStrategy(zeroDayRes);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reach backend");
@@ -172,6 +177,7 @@ export function SocDashboard() {
         <div className="grid gap-4">
           <MitreCoveragePanel coverage={coverage} />
           <AttackAttribution alert={selected} />
+          <ZeroDayPrevention strategy={zeroDayStrategy} />
           <IncidentTimelinePanel timeline={timeline} />
           <SocCopilot alert={selected} answer={copilot} onAsk={askCopilot} />
           <PlaybookConsole runs={runs} onApprove={(id) => void approve(id)} />

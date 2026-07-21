@@ -106,6 +106,16 @@ export interface ConnectorInfo {
   required_for: string[];
 }
 
+export interface ZeroDayStrategy {
+  name: string;
+  summary: string;
+  lifecycle: { stage: string; defensive_goal: string; controls: string[] }[];
+  watch_signals: string[];
+  mitre_focus: string[];
+  example_incidents: { name: string; lesson: string }[];
+  aegis_mapping: string[];
+}
+
 export interface CopilotAnswer {
   answer: string;
   evidence: string[];
@@ -133,6 +143,7 @@ export const api = {
   alerts: () => request<ApiList<SocAlert>>("/alerts?source=live_traffic&limit=30"),
   audit: () => request<ApiList<AuditEntry>>("/audit?limit=20"),
   coverage: () => request<MitreCoverage>("/coverage/mitre"),
+  zeroDayStrategy: () => request<ZeroDayStrategy>("/prevention/zero-day"),
   timeline: (alertId: string) => request<IncidentTimeline>(`/incidents/${alertId}/timeline`),
   connectors: () => request<ApiList<ConnectorInfo>>("/integrations/connectors"),
   askCopilot: (question: string, alertId?: string) =>

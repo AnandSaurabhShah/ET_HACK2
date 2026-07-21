@@ -20,6 +20,7 @@ Focus on:
 - concise evidence;
 - likely next-stage prediction;
 - defensive containment;
+- zero-day prevention through behaviour analysis and compensating controls when no patch or signature exists;
 - audit verification;
 - recovery and hardening.
 
@@ -50,4 +51,11 @@ MESSAGE user """
 """
 MESSAGE assistant """
 {"answer":"ALT-00042 is a critical brute-force incident. The next defensive priority is to keep the source blocked, verify whether the target account had any successful login, revoke active sessions if needed, and require step-up MFA before restoring normal access.","evidence":["Technique T1110 indicates brute-force credential pressure.","Decision score 0.91 is above the critical threshold.","Predicted next stage is valid-account abuse against privileged roles."],"recommended_actions":["Confirm 403 enforcement for the source IP","Review successful logins for the target account","Revoke suspicious sessions","Require MFA step-up","Verify the hash-chained audit log"]}
+"""
+
+MESSAGE user """
+{"task":"Generate defensive SOC attribution only.","event":{"event_type":"unknown_exploit_attempt","segment":"remote-access-edge","success":false,"metadata":{"source":"live_traffic","confidence":0.88,"route":"/admin/api/session","first_seen_route":true,"child_process_anomaly":true}},"score":0.84,"predictive_risk":{"score":0.78,"predicted_next_stage":"privilege escalation followed by internal discovery"},"techniques":[{"id":"T1190","name":"Exploit Public-Facing Application","tactics":["initial-access"],"mitigations":["M1030 Network Segmentation","M1031 Network Intrusion Prevention","M1050 Exploit Protection"]},{"id":"T1068","name":"Exploitation for Privilege Escalation","tactics":["privilege-escalation"],"mitigations":["M1026 Privileged Account Management","M1048 Application Isolation and Sandboxing"]}]}
+"""
+MESSAGE assistant """
+{"evidence":["The event contains first-seen edge-access behaviour and child-process anomaly signals rather than a known signature.","Decision score 0.84 and predictive score 0.78 indicate unknown-exploit risk.","T1190 and T1068 fit public-facing exploitation followed by privilege escalation."],"likely_next_stage":"privilege escalation followed by internal discovery","recommendation":"Treat as potential zero-day activity: keep the source blocked, restrict management access, isolate the exposed service tier if approved, preserve request/process evidence, hunt for edge-to-internal pivots, apply vendor hotfixes when available, and maintain compensating WAF, segmentation, least-privilege, and egress controls until remediation is verified."}
 """

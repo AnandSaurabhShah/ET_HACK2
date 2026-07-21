@@ -69,6 +69,7 @@ One-command Windows demo:
 - Hash-chained append-only audit log for every automated action.
 - `RESULTS.md` generated from the eval harness, not hand-entered metrics.
 - ATT&CK coverage heatmap, incident timeline replay, production connector readiness, and defensive SOC copilot in the dashboard.
+- Zero-day prevention strategy panel covering unknown-vulnerability, exploitation, execution, and disclosure/patch stages with behaviour-based controls.
 
 ## What's Real vs. Simulated
 
