@@ -15,4 +15,6 @@ backend/app/rag/chroma/
 backend/app/data/*.db
 backend/app/data/*.db-*
 backend/app/data/soar_sandbox/
+submission/assets/pitch_frames/
+submission/video/pitch_concat.txt
 .pytest_cache/
