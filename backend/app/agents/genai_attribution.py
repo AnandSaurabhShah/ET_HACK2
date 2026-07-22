@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ast
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -80,10 +81,40 @@ class GenAIAttributionProvider:
     def _system_prompt(self) -> str:
         return (
             "You are Aegis-CNI, a defensive GenAI SOC analyst for Indian critical exam infrastructure. "
-            "Return strict JSON only. Use MITRE ATT&CK evidence, predictive-risk signals, and audit-aware recommendations. "
+            "Return strict JSON only. Answer only questions about portal security, incoming attacks, alerts, "
+            "MITRE ATT&CK attribution, mitigation, audit evidence, CVEs, and incident response. "
+            "If a question is outside that scope, refuse briefly and redirect to SOC security context. "
+            "JSON list fields must be arrays of complete strings, never a single string. "
+            "Use MITRE ATT&CK evidence, predictive-risk signals, and audit-aware recommendations. "
             "Never provide exploit instructions, payload construction, malware steps, credential theft steps, or offensive playbooks. "
             "Focus on detection explanation, likely next-stage prediction, containment, verification, and recovery."
         )
+
+    def _coerce_string_list(self, value: object, fallback: list[str], limit: int) -> list[str]:
+        if isinstance(value, (list, tuple)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return items[:limit] or fallback[:limit]
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped][:limit] if stripped else fallback[:limit]
+        return fallback[:limit]
+
+    def _coerce_text(self, value: object, fallback: str) -> str:
+        if isinstance(value, (list, tuple)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return ", ".join(items) if items else fallback
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                try:
+                    parsed = ast.literal_eval(stripped)
+                    if isinstance(parsed, (list, tuple)):
+                        items = [str(item).strip() for item in parsed if str(item).strip()]
+                        return ", ".join(items) if items else fallback
+                except (SyntaxError, ValueError):
+                    pass
+            return stripped or fallback
+        return str(value).strip() if value is not None else fallback
 
     def _prompt(
         self,
@@ -112,9 +143,8 @@ class GenAIAttributionProvider:
         }
 
     def _draft_from_parsed(self, parsed: dict, provider: str, primary: MitreTechnique) -> AttributionDraft:
-        evidence = parsed.get("evidence") or []
         return AttributionDraft(
-            evidence=[str(item) for item in evidence][:8],
+            evidence=self._coerce_string_list(parsed.get("evidence"), [], 8),
             likely_next_stage=str(parsed.get("likely_next_stage") or "credential validation and lateral movement"),
             recommendation=str(
                 parsed.get("recommendation")
@@ -374,11 +404,13 @@ class GenAIAttributionProvider:
             body = json.loads(response.read().decode("utf-8"))
         parsed = json.loads(body.get("response") or "{}")
         return {
-            "answer": str(parsed.get("answer") or fallback["answer"]),
-            "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
-            "recommended_actions": [
-                str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
-            ][:6],
+            "answer": self._coerce_text(parsed.get("answer"), fallback["answer"]),
+            "evidence": self._coerce_string_list(parsed.get("evidence"), fallback["evidence"], 8),
+            "recommended_actions": self._coerce_string_list(
+                parsed.get("recommended_actions"),
+                fallback["recommended_actions"],
+                6,
+            ),
             "provider": provider_label or f"ollama:{selected_model}",
         }
 
@@ -411,11 +443,13 @@ class GenAIAttributionProvider:
             body = json.loads(response.read().decode("utf-8"))
         parsed = json.loads(body["choices"][0]["message"]["content"])
         return {
-            "answer": str(parsed.get("answer") or fallback["answer"]),
-            "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
-            "recommended_actions": [
-                str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
-            ][:6],
+            "answer": self._coerce_text(parsed.get("answer"), fallback["answer"]),
+            "evidence": self._coerce_string_list(parsed.get("evidence"), fallback["evidence"], 8),
+            "recommended_actions": self._coerce_string_list(
+                parsed.get("recommended_actions"),
+                fallback["recommended_actions"],
+                6,
+            ),
             "provider": provider_label,
         }
 

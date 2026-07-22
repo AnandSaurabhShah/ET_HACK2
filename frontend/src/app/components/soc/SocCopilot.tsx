@@ -34,7 +34,7 @@ export function SocCopilot({
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           className="min-w-0 flex-1 rounded-sm border border-border/70 bg-background px-2 py-2 text-[12px] text-foreground outline-none focus:ring-2 focus:ring-ring"
-          placeholder={alert ? `Ask about ${alert.alert_id}` : "Ask about live incidents"}
+          placeholder={alert ? `Ask security context for ${alert.alert_id}` : "Ask about portal security or live attacks"}
         />
         <Button size="sm" className="h-9" onClick={() => void ask()} disabled={busy}>
           <Send className="size-3.5" />

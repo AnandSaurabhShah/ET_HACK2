@@ -679,7 +679,92 @@ def _timeline_for_alert(alert: Alert) -> list[dict]:
     return sorted([*timeline, *related], key=lambda item: str(item["timestamp"]))
 
 
+COPILOT_SECURITY_TERMS = {
+    "alert",
+    "attack",
+    "att&ck",
+    "audit",
+    "block",
+    "blocked",
+    "brute",
+    "contain",
+    "containment",
+    "copilot",
+    "cve",
+    "defend",
+    "defense",
+    "detect",
+    "detection",
+    "exploit",
+    "firewall",
+    "incident",
+    "ioc",
+    "ip",
+    "latency",
+    "login",
+    "mitigate",
+    "mitigation",
+    "mitre",
+    "perimeter",
+    "portal",
+    "predict",
+    "risk",
+    "security",
+    "severity",
+    "soc",
+    "source",
+    "sql",
+    "sqli",
+    "threat",
+    "timeline",
+    "traffic",
+    "xss",
+    "zero-day",
+}
+COPILOT_ALERT_CONTEXT_TERMS = {
+    "why",
+    "explain",
+    "summary",
+    "summarize",
+    "status",
+    "next",
+    "recommend",
+    "evidence",
+    "source",
+    "score",
+    "confidence",
+}
+
+
+def _is_copilot_security_question(question: str, alert: Alert | None) -> bool:
+    normalized = question.lower().strip()
+    if not normalized:
+        return False
+    if any(term in normalized for term in COPILOT_SECURITY_TERMS):
+        return True
+    return bool(alert and any(term in normalized for term in COPILOT_ALERT_CONTEXT_TERMS))
+
+
+def _copilot_scope_refusal() -> dict:
+    return {
+        "answer": (
+            "I can only answer questions about the portal's security posture, live incoming attacks, "
+            "alerts, ATT&CK attribution, mitigation, audit evidence, CVEs, and incident response."
+        ),
+        "evidence": ["SOC Copilot scope guard blocked an unrelated question before any GenAI provider call."],
+        "recommended_actions": [
+            "Ask about a selected alert",
+            "Ask how to block or mitigate an incoming attack",
+            "Ask for audit, CVE, ATT&CK, or risk context",
+        ],
+        "provider": "policy-guard",
+    }
+
+
 def _copilot_answer(question: str, alert: Alert | None) -> dict:
+    if not _is_copilot_security_question(question, alert):
+        return _copilot_scope_refusal()
+
     q = question.lower()
     if not alert:
         live_count = len([row for row in ALERTS if row.event.metadata.get("source") == "live_traffic"])

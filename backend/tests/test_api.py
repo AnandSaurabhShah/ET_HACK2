@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.agents.genai_attribution import GenAIAttributionProvider
 from app.main import app
 
 
@@ -139,3 +140,29 @@ def test_repeat_attack_from_blocked_ip_still_creates_live_alert() -> None:
         assert after_response.json()["total"] > before
         latest = after_response.json()["items"][0]
         assert latest["event"]["metadata"]["repeat_blocked_attack"] is True
+
+
+def test_copilot_rejects_out_of_scope_questions() -> None:
+    with TestClient(app) as client:
+        response = client.post("/copilot/ask", json={"question": "Write a poem about exam preparation"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "policy-guard"
+        assert "only answer questions about the portal's security" in body["answer"]
+
+
+def test_copilot_allows_portal_security_questions() -> None:
+    with TestClient(app) as client:
+        response = client.post("/copilot/ask", json={"question": "How many live attacks are in the portal SOC feed?"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] != "policy-guard"
+        assert "live" in body["answer"].lower() or "incident" in body["answer"].lower()
+
+
+def test_genai_list_fields_do_not_split_strings() -> None:
+    provider = GenAIAttributionProvider()
+    assert provider._coerce_string_list("live_incident_count", ["fallback"], 8) == ["live_incident_count"]
+    assert provider._coerce_string_list(["Confirm block", "Review audit"], ["fallback"], 1) == ["Confirm block"]
+    assert provider._coerce_text("['80']", "fallback") == "80"
+    assert provider._coerce_text(["80", "live incidents"], "fallback") == "80, live incidents"
