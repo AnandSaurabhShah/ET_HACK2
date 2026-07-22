@@ -19,7 +19,21 @@ Optional local GenAI model:
 .\scripts\create_ollama_model.ps1
 ```
 
-This creates `aegis-cni:latest` in Ollama from `ollama/Modelfile`. The backend defaults to `AEGIS_GENAI_PROVIDER=ollama` and uses `http://127.0.0.1:11434/api/generate`; if Ollama is not running, it falls back to deterministic defensive attribution so the SOC stays available.
+This creates `aegis-cni:latest` in Ollama from `ollama/Modelfile`. The backend defaults to `AEGIS_GENAI_PROVIDER=auto`: it tries a configured online GenAI API first, then local Ollama at `http://127.0.0.1:11434/api/generate`, then deterministic defensive attribution if neither is reachable.
+
+Online-first GenAI configuration:
+
+```env
+AEGIS_GENAI_PROVIDER=auto
+AEGIS_GENAI_ONLINE_PROVIDER=openai-compatible
+AEGIS_GENAI_ONLINE_ENDPOINT=https://your-provider.example/v1/chat/completions
+AEGIS_GENAI_ONLINE_MODEL=your-online-model
+AEGIS_GENAI_ONLINE_API_KEY=your-key
+AEGIS_GENAI_ENDPOINT=http://127.0.0.1:11434/api/generate
+AEGIS_GENAI_MODEL=aegis-cni:latest
+```
+
+For a hosted Ollama-compatible API, use `AEGIS_GENAI_ONLINE_PROVIDER=ollama` and point `AEGIS_GENAI_ONLINE_ENDPOINT` at that service's `/api/generate` endpoint.
 
 Production-shaped local stack:
 
@@ -88,7 +102,7 @@ SIMULATED/MOCKED:
 - Synthetic telemetry in `app/ingest/synth_generator.py` models exam infrastructure activity and injected campaigns.
 - Synthetic CVE feed in `seed.py` models government infrastructure remediation prioritisation.
 - Digital twin attack simulation is model-only and never touches a live frontend session.
-- LLM reasoning defaults to deterministic offline text; no paid API is required.
+- GenAI reasoning runs online-first when configured, local Ollama second, and deterministic offline last; no paid API is required for the local demo.
 - Manual SOC MTTD/MTTR baselines are labelled simulated baselines for comparison.
 
 ## API

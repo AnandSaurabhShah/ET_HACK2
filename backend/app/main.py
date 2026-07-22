@@ -490,11 +490,7 @@ def ready() -> dict:
         "anomaly_model_fit": anomaly_agent._fit,
         "predictive_risk_model_fit": risk_agent._fit,
         "predictive_risk_threshold": settings.predictive_risk_threshold,
-        "genai_attribution": {
-            "provider": settings.genai_provider,
-            "configured": attribution_agent.genai.available(),
-            "model": settings.genai_model if attribution_agent.genai.available() else "offline-fallback",
-        },
+        "genai_attribution": attribution_agent.genai.status(),
         "mitre_techniques": len(attribution_agent.retriever.techniques),
         "demo_traffic": demo_status(),
         "blocked_ips": GLOBAL_BLOCKLIST.snapshot(),

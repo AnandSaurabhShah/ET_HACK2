@@ -21,11 +21,61 @@ class GenAIAttributionProvider:
     def __init__(self) -> None:
         self.settings = get_settings()
 
+    def _provider_mode(self) -> str:
+        return self.settings.genai_provider.lower().strip()
+
+    def _local_ollama_configured(self) -> bool:
+        return bool(self.settings.genai_endpoint and self.settings.genai_model)
+
+    def _online_provider(self) -> str:
+        return (self.settings.genai_online_provider or "openai-compatible").lower().strip()
+
+    def _online_configured(self) -> bool:
+        endpoint = self.settings.genai_online_endpoint.strip()
+        model = self.settings.genai_online_model.strip()
+        if not endpoint or not model:
+            return False
+        if self._online_provider() == "ollama":
+            return True
+        return bool(self.settings.genai_online_api_key or self.settings.genai_api_key)
+
     def available(self) -> bool:
-        provider = self.settings.genai_provider.lower()
+        provider = self._provider_mode()
+        if provider == "auto":
+            return self._online_configured() or self._local_ollama_configured()
         if provider == "ollama":
-            return bool(self.settings.genai_endpoint and self.settings.genai_model)
+            return self._local_ollama_configured()
         return provider not in {"", "offline", "disabled"} and bool(self.settings.genai_api_key)
+
+    def status(self) -> dict:
+        provider = self._provider_mode()
+        online_ready = self._online_configured()
+        local_ready = self._local_ollama_configured()
+        if provider == "auto":
+            active_order = []
+            if online_ready:
+                active_order.append(f"online-{self._online_provider()}:{self.settings.genai_online_model}")
+            if local_ready:
+                active_order.append(f"local-ollama:{self.settings.genai_model}")
+            active_order.append("offline-deterministic")
+            return {
+                "provider": provider,
+                "configured": online_ready or local_ready,
+                "active_order": active_order,
+                "online_provider": self._online_provider(),
+                "online_configured": online_ready,
+                "local_ollama_configured": local_ready,
+                "model": self.settings.genai_online_model if online_ready else self.settings.genai_model,
+            }
+        return {
+            "provider": provider,
+            "configured": self.available(),
+            "active_order": [f"{provider}:{self.settings.genai_model}" if self.available() else "offline-deterministic"],
+            "online_provider": self._online_provider(),
+            "online_configured": online_ready,
+            "local_ollama_configured": local_ready,
+            "model": self.settings.genai_model if self.available() else "offline-fallback",
+        }
 
     def _system_prompt(self) -> str:
         return (
@@ -73,9 +123,23 @@ class GenAIAttributionProvider:
             provider=provider,
         )
 
-    def _generate_ollama(self, prompt: dict, primary: MitreTechnique) -> AttributionDraft:
+    def _generate_ollama(
+        self,
+        prompt: dict,
+        primary: MitreTechnique,
+        *,
+        endpoint: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        provider_label: str | None = None,
+    ) -> AttributionDraft:
+        selected_endpoint = endpoint or self.settings.genai_endpoint
+        selected_model = model or self.settings.genai_model
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         payload = {
-            "model": self.settings.genai_model,
+            "model": selected_model,
             "system": self._system_prompt(),
             "prompt": json.dumps(prompt, default=str),
             "stream": False,
@@ -84,18 +148,73 @@ class GenAIAttributionProvider:
             "options": {"temperature": 0.15, "num_predict": 700},
         }
         request = urllib.request.Request(
-            self.settings.genai_endpoint,
+            selected_endpoint,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
             body = json.loads(response.read().decode("utf-8"))
         parsed = json.loads(body.get("response") or "{}")
-        return self._draft_from_parsed(parsed, f"ollama:{self.settings.genai_model}", primary)
+        return self._draft_from_parsed(parsed, provider_label or f"ollama:{selected_model}", primary)
+
+    def _generate_chat_completion(
+        self,
+        prompt: dict,
+        primary: MitreTechnique,
+        *,
+        endpoint: str,
+        model: str,
+        api_key: str,
+        provider_label: str,
+    ) -> AttributionDraft:
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": self._system_prompt()},
+                {"role": "user", "content": json.dumps(prompt, default=str)},
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+        }
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        content = body["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        return self._draft_from_parsed(parsed, provider_label, primary)
+
+    def _generate_online(self, prompt: dict, primary: MitreTechnique) -> AttributionDraft:
+        endpoint = self.settings.genai_online_endpoint.strip()
+        model = self.settings.genai_online_model.strip()
+        api_key = self.settings.genai_online_api_key or self.settings.genai_api_key
+        if self._online_provider() == "ollama":
+            return self._generate_ollama(
+                prompt,
+                primary,
+                endpoint=endpoint,
+                model=model,
+                api_key=api_key,
+                provider_label=f"online-ollama:{model}",
+            )
+        if not api_key:
+            raise RuntimeError("online API key is not configured")
+        return self._generate_chat_completion(
+            prompt,
+            primary,
+            endpoint=endpoint,
+            model=model,
+            api_key=api_key,
+            provider_label=f"online:{model}",
+        )
 
     def warm_up(self) -> bool:
-        if self.settings.genai_provider.lower() != "ollama" or not self.available():
+        if self._provider_mode() not in {"auto", "ollama"} or not self._local_ollama_configured():
             return False
         payload = {
             "model": self.settings.genai_model,
@@ -181,46 +300,148 @@ class GenAIAttributionProvider:
                 risk,
                 reason="Live request path prioritised low-latency containment; SOC Copilot uses Ollama for on-demand GenAI reasoning.",
             )
+        provider = self._provider_mode()
         if not self.available():
             return self._offline(event, score, techniques, risk)
 
         primary = techniques[0]
         prompt = self._prompt(event=event, score=score, techniques=techniques, risk=risk)
-        if self.settings.genai_provider.lower() == "ollama":
+        if provider == "auto":
+            fallback_reasons = []
+            if self._online_configured():
+                try:
+                    return self._generate_online(prompt, primary)
+                except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
+                    fallback_reasons.append(f"online API unavailable or invalid JSON: {exc}")
+            if self._local_ollama_configured():
+                try:
+                    return self._generate_ollama(prompt, primary, provider_label=f"local-ollama:{self.settings.genai_model}")
+                except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                    fallback_reasons.append(f"local Ollama unavailable or invalid JSON: {exc}")
+            return self._offline(event, score, techniques, risk, reason="; ".join(fallback_reasons) or "no GenAI endpoint configured")
+
+        if provider == "ollama":
             try:
                 return self._generate_ollama(prompt, primary)
             except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
                 return self._offline(event, score, techniques, risk, reason=f"Ollama unavailable or invalid JSON: {exc}")
 
+        try:
+            if not self.settings.genai_api_key:
+                raise RuntimeError("API key is not configured")
+            return self._generate_chat_completion(
+                prompt,
+                primary,
+                endpoint=self.settings.genai_endpoint,
+                model=self.settings.genai_model,
+                api_key=self.settings.genai_api_key,
+                provider_label=provider,
+            )
+        except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
+            return self._offline(event, score, techniques, risk, reason=str(exc))
+
+    def _answer_with_ollama(
+        self,
+        *,
+        prompt: dict,
+        fallback: dict,
+        endpoint: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        provider_label: str | None = None,
+    ) -> dict:
+        selected_endpoint = endpoint or self.settings.genai_endpoint
+        selected_model = model or self.settings.genai_model
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         payload = {
-            "model": self.settings.genai_model,
+            "model": selected_model,
+            "system": self._system_prompt(),
+            "prompt": json.dumps(prompt, default=str),
+            "stream": False,
+            "format": "json",
+            "keep_alive": "30m",
+            "options": {"temperature": 0.2, "num_predict": 600},
+        }
+        request = urllib.request.Request(
+            selected_endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        parsed = json.loads(body.get("response") or "{}")
+        return {
+            "answer": str(parsed.get("answer") or fallback["answer"]),
+            "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
+            "recommended_actions": [
+                str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
+            ][:6],
+            "provider": provider_label or f"ollama:{selected_model}",
+        }
+
+    def _answer_with_chat_completion(
+        self,
+        *,
+        prompt: dict,
+        fallback: dict,
+        endpoint: str,
+        model: str,
+        api_key: str,
+        provider_label: str,
+    ) -> dict:
+        payload = {
+            "model": model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": self._system_prompt(),
-                },
+                {"role": "system", "content": self._system_prompt()},
                 {"role": "user", "content": json.dumps(prompt, default=str)},
             ],
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
         }
         request = urllib.request.Request(
-            self.settings.genai_endpoint,
+            endpoint,
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.settings.genai_api_key}",
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            content = body["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-            return self._draft_from_parsed(parsed, self.settings.genai_provider, primary)
-        except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
-            return self._offline(event, score, techniques, risk, reason=str(exc))
+        with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        parsed = json.loads(body["choices"][0]["message"]["content"])
+        return {
+            "answer": str(parsed.get("answer") or fallback["answer"]),
+            "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
+            "recommended_actions": [
+                str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
+            ][:6],
+            "provider": provider_label,
+        }
+
+    def _answer_with_online(self, *, prompt: dict, fallback: dict) -> dict:
+        endpoint = self.settings.genai_online_endpoint.strip()
+        model = self.settings.genai_online_model.strip()
+        api_key = self.settings.genai_online_api_key or self.settings.genai_api_key
+        if self._online_provider() == "ollama":
+            return self._answer_with_ollama(
+                prompt=prompt,
+                fallback=fallback,
+                endpoint=endpoint,
+                model=model,
+                api_key=api_key,
+                provider_label=f"online-ollama:{model}",
+            )
+        if not api_key:
+            raise RuntimeError("online API key is not configured")
+        return self._answer_with_chat_completion(
+            prompt=prompt,
+            fallback=fallback,
+            endpoint=endpoint,
+            model=model,
+            api_key=api_key,
+            provider_label=f"online:{model}",
+        )
 
     def answer_copilot(self, *, question: str, context: dict, fallback: dict) -> dict:
         if not self.available():
@@ -231,34 +452,41 @@ class GenAIAttributionProvider:
             "context": context,
             "required_json_keys": ["answer", "evidence", "recommended_actions"],
         }
-        if self.settings.genai_provider.lower() == "ollama":
-            payload = {
-                "model": self.settings.genai_model,
-                "system": self._system_prompt(),
-                "prompt": json.dumps(prompt, default=str),
-                "stream": False,
-                "format": "json",
-                "keep_alive": "30m",
-                "options": {"temperature": 0.2, "num_predict": 600},
-            }
-            request = urllib.request.Request(
-                self.settings.genai_endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
+        provider = self._provider_mode()
+        if provider == "auto":
+            fallback_reasons = []
+            if self._online_configured():
+                try:
+                    return self._answer_with_online(prompt=prompt, fallback=fallback)
+                except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
+                    fallback_reasons.append(f"online API unavailable or invalid JSON: {exc}")
+            if self._local_ollama_configured():
+                try:
+                    return self._answer_with_ollama(
+                        prompt=prompt,
+                        fallback=fallback,
+                        provider_label=f"local-ollama:{self.settings.genai_model}",
+                    )
+                except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                    fallback_reasons.append(f"local Ollama unavailable or invalid JSON: {exc}")
+            return {**fallback, "provider": "offline", "fallback_reason": "; ".join(fallback_reasons) or "no GenAI endpoint configured"}
+
+        if provider == "ollama":
             try:
-                with urllib.request.urlopen(request, timeout=self.settings.genai_timeout_seconds) as response:
-                    body = json.loads(response.read().decode("utf-8"))
-                parsed = json.loads(body.get("response") or "{}")
-                return {
-                    "answer": str(parsed.get("answer") or fallback["answer"]),
-                    "evidence": [str(item) for item in (parsed.get("evidence") or fallback["evidence"])][:8],
-                    "recommended_actions": [
-                        str(item) for item in (parsed.get("recommended_actions") or fallback["recommended_actions"])
-                    ][:6],
-                    "provider": f"ollama:{self.settings.genai_model}",
-                }
+                return self._answer_with_ollama(prompt=prompt, fallback=fallback)
             except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
                 return {**fallback, "provider": "offline", "fallback_reason": f"Ollama unavailable or invalid JSON: {exc}"}
-        return fallback
+
+        try:
+            if not self.settings.genai_api_key:
+                raise RuntimeError("API key is not configured")
+            return self._answer_with_chat_completion(
+                prompt=prompt,
+                fallback=fallback,
+                endpoint=self.settings.genai_endpoint,
+                model=self.settings.genai_model,
+                api_key=self.settings.genai_api_key,
+                provider_label=provider,
+            )
+        except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
+            return {**fallback, "provider": "offline", "fallback_reason": str(exc)}

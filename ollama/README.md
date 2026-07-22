@@ -20,7 +20,8 @@ from `ollama/Modelfile`.
 
 - A local Ollama model specialised through a defensive system prompt and curated SOC examples.
 - Used by backend GenAI attribution and SOC Copilot through Ollama's local `/api/generate` endpoint.
-- Safe-by-default: if Ollama is unavailable or returns invalid JSON, the backend falls back to deterministic defensive output.
+- Can also be used through a hosted Ollama-compatible `/api/generate` endpoint by setting `AEGIS_GENAI_PROVIDER=auto` and `AEGIS_GENAI_ONLINE_PROVIDER=ollama`.
+- Safe-by-default: if the online API or local Ollama is unavailable or returns invalid JSON, the backend falls back to deterministic defensive output.
 
 ## What True Weight Fine-Tuning Would Add
 

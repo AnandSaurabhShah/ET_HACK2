@@ -40,12 +40,23 @@ The dashboard stores both in `event.metadata.model_scores`.
 
 ## GenAI Attribution
 
-Default mode is the local Ollama-backed Aegis model:
+Default mode is `auto`, which uses the strongest available GenAI path in order:
+
+1. Configured online API while the operator is online and the provider responds.
+2. Local Ollama Aegis model.
+3. Deterministic offline defensive fallback.
+
+Online API configuration:
 
 ```env
-AEGIS_GENAI_PROVIDER=ollama
+AEGIS_GENAI_PROVIDER=auto
+AEGIS_GENAI_ONLINE_PROVIDER=openai-compatible
+AEGIS_GENAI_ONLINE_ENDPOINT=https://your-provider.example/v1/chat/completions
+AEGIS_GENAI_ONLINE_MODEL=your-online-model
+AEGIS_GENAI_ONLINE_API_KEY=your-key
 AEGIS_GENAI_ENDPOINT=http://127.0.0.1:11434/api/generate
 AEGIS_GENAI_MODEL=aegis-cni:latest
+AEGIS_GENAI_TIMEOUT_SECONDS=30
 ```
 
 Create the model with:
@@ -56,14 +67,14 @@ Create the model with:
 
 This is a project-tuned Ollama model built from `ollama/Modelfile` with defensive system instructions and SOC examples. True weight fine-tuning can be added later by training a LoRA/adapter externally and referencing it from the Modelfile.
 
-To use an OpenAI-compatible chat-completions provider instead:
+To use a hosted Ollama-compatible API as the online path:
 
 ```env
-AEGIS_GENAI_PROVIDER=openai-compatible
-AEGIS_GENAI_ENDPOINT=https://api.openai.com/v1/chat/completions
-AEGIS_GENAI_MODEL=gpt-4.1-mini
-AEGIS_GENAI_API_KEY=your-key
-AEGIS_GENAI_TIMEOUT_SECONDS=30
+AEGIS_GENAI_PROVIDER=auto
+AEGIS_GENAI_ONLINE_PROVIDER=ollama
+AEGIS_GENAI_ONLINE_ENDPOINT=https://your-ollama-host.example/api/generate
+AEGIS_GENAI_ONLINE_MODEL=aegis-cni:latest
+AEGIS_GENAI_ONLINE_API_KEY=optional-bearer-token
 ```
 
 The prompt is defensive-only and asks for strict JSON:
@@ -72,7 +83,7 @@ The prompt is defensive-only and asks for strict JSON:
 - likely next stage;
 - defensive recommendation.
 
-If the provider times out or returns invalid JSON, attribution falls back locally and records the fallback reason in evidence.
+If the online provider times out or returns invalid JSON, attribution falls back to local Ollama. If local Ollama is unavailable too, it falls back to deterministic defensive output and records the fallback reason in evidence.
 
 ## Required For A Real Enterprise Deployment
 
