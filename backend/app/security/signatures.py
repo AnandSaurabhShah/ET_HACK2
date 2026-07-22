@@ -37,11 +37,35 @@ XSS_PATTERNS = [
 SCANNER_UA_PATTERNS = [
     re.compile(r"(?i)\b(sqlmap|nikto|nmap|hydra|gobuster|dirbuster|wfuzz|ffuf|python-requests|burp suite)\b"),
 ]
+AI_ATTACK_PATTERNS = [
+    re.compile(r"(?i)\b(ignore|forget|bypass|override)\s+(?:all\s+)?(?:previous|prior|system|developer|safety)\s+(?:instructions|rules|messages|policy|policies)\b"),
+    re.compile(r"(?i)\b(reveal|print|dump|show|leak|exfiltrate)\s+(?:the\s+)?(?:system\s+prompt|developer\s+message|hidden\s+instructions|chain[-\s]?of[-\s]?thought)\b"),
+    re.compile(r"(?i)\b(jailbreak|dan\s+mode|developer\s+mode|prompt\s+injection|system\s+prompt\s+leak)\b"),
+    re.compile(r"(?i)\b(api[_\s-]?key|secret[_\s-]?key|bearer\s+token|environment\s+variable|\.env)\b.*\b(reveal|print|dump|show|leak|exfiltrate|send)\b"),
+    re.compile(r"(?i)\b(function_call|tool_calls?|execute\s+tool|run\s+tool|call\s+the\s+tool)\b.*\b(ignore|bypass|override|without\s+approval)\b"),
+]
+
+
+def detect_ai_attack_text(payload: str) -> SignatureMatch | None:
+    decoded_payload = f"{payload} {urllib.parse.unquote_plus(payload)}"
+    if any(pattern.search(decoded_payload) for pattern in AI_ATTACK_PATTERNS):
+        return SignatureMatch(
+            family="ai_prompt_injection",
+            technique_id="T1562",
+            event_type="ai_prompt_injection_attempt",
+            confidence=0.93,
+            reason="AI prompt-injection or model-secret exfiltration attempt",
+            block_immediately=True,
+        )
+    return None
 
 
 def scan_request(payload: str, user_agent: str, header_bytes: int, body_bytes: int) -> list[SignatureMatch]:
     matches: list[SignatureMatch] = []
     payload = f"{payload} {urllib.parse.unquote_plus(payload)}"
+    ai_attack = detect_ai_attack_text(payload)
+    if ai_attack:
+        matches.append(ai_attack)
     if any(pattern.search(payload) for pattern in SQLI_PATTERNS):
         matches.append(
             SignatureMatch(

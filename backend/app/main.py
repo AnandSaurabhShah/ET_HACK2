@@ -32,7 +32,7 @@ from app.paths import ALERTS_PATH, EVAL_REPORT_PATH, EVENTS_PATH, ensure_dirs
 from app.storage import append_jsonl, read_json, read_jsonl, utc_now, write_json, write_jsonl
 from app.security import GLOBAL_BLOCKLIST, GLOBAL_RATE_TRACKER, OperatorAuth, RateSignal, check_ingest_rate_limit
 from app.security.policy import MfaStore, extract_forwarded_ip, is_trusted_proxy, unsafe_redirect_target, validate_password_strength
-from app.security.signatures import SignatureMatch, scan_request
+from app.security.signatures import SignatureMatch, detect_ai_attack_text, scan_request
 from app.agents.zero_day_strategy import zero_day_prevention_strategy
 
 
@@ -63,6 +63,7 @@ DEMO_NORMAL_POOL: list[TelemetryEvent] = []
 DEMO_ATTACK_TECHNIQUES = ["T1110", "T1078", "T1021", "T1499"]
 DEMO_STATS = {"benign_events": 0, "attack_events": 0, "last_event": None, "last_alert_id": None}
 MIDDLEWARE_SKIP_PREFIXES = ("/alerts/stream",)
+COPILOT_ROUTE_PREFIXES = ("/copilot/ask",)
 LOCAL_SOC_READ_PREFIXES = (
     "/alerts",
     "/audit",
@@ -87,6 +88,7 @@ ACTIVE_LIVE_TECHNIQUES = {
     "T1036": "client source masquerading / spoofed forwarding header detection",
     "T1557": "unauthorized redirect / adversary-in-the-middle prevention",
     "T1499": "oversized/malformed request pressure",
+    "T1562": "AI prompt-injection / model guardrail impairment detection",
     "T1595": "request burst and endpoint enumeration",
 }
 
@@ -310,7 +312,7 @@ def _block_ip_once(ip: str, signal: SignatureMatch | RateSignal, request_id: str
 
 def _block_alert_source(alert: Alert, actor: str, reason: str | None = None) -> dict:
     ip = alert.event.ip
-    technique = alert.attribution.techniques[0].id
+    technique = str(alert.event.metadata.get("technique_id") or alert.event.technique_id or alert.attribution.techniques[0].id)
     if GLOBAL_BLOCKLIST.is_blocked(ip):
         entry = next((row for row in GLOBAL_BLOCKLIST.snapshot() if row["ip"] == ip), {})
     else:
@@ -448,9 +450,14 @@ async def live_request_detection_middleware(request: Request, call_next):
     request_size = header_size + len(body) + len(str(request.url.query or ""))
     request_text = _captured_text(request, body_text)
     signature_matches = scan_request(request_text, user_agent, header_size, len(body))
+    if any(path.startswith(prefix) for prefix in COPILOT_ROUTE_PREFIXES):
+        signature_matches = [match for match in signature_matches if match.family != "ai_prompt_injection"]
     spoofing_signal = _spoofing_signal(request)
     if spoofing_signal:
-        signature_matches.insert(0, spoofing_signal)
+        if any(match.family == "ai_prompt_injection" for match in signature_matches):
+            signature_matches.append(spoofing_signal)
+        else:
+            signature_matches.insert(0, spoofing_signal)
     rate_result = GLOBAL_RATE_TRACKER.record_request(ip, path, failed_login, target_user_id)
     supporting_scanner_only = signature_matches and all(match.family == "scanner_user_agent" for match in signature_matches)
     signals: list[SignatureMatch | RateSignal] = []
@@ -699,12 +706,13 @@ def process_telemetry_event(event: TelemetryEvent) -> dict:
             payload={"event_id": event.event_id, "alert_id": alert_id},
         )
         if event.metadata.get("source") == "live_traffic":
+            containment_technique = str(event.metadata.get("technique_id") or event.technique_id or attribution.techniques[0].id)
             _block_alert_source(
                 ALERTS[0],
                 actor="ai_containment_agent",
                 reason=(
                     "AI live-attack containment: anomaly/predictive model decision "
-                    f"{decision_score:.2f} mapped to {attribution.techniques[0].id}; source blocked."
+                    f"{decision_score:.2f} mapped to {containment_technique}; source blocked."
                 ),
             )
     return {
@@ -890,7 +898,37 @@ def _copilot_scope_refusal() -> dict:
     }
 
 
+def _copilot_ai_guard_refusal(match: SignatureMatch) -> dict:
+    audit.append(
+        actor="soc_copilot_guard",
+        action="block_ai_prompt_attack",
+        justification=f"Blocked Copilot prompt before GenAI provider call: {match.reason}.",
+        blast_radius=0,
+        payload={"family": match.family, "technique_id": match.technique_id, "confidence": match.confidence},
+    )
+    return {
+        "answer": (
+            "Blocked. That prompt looks like an AI prompt-injection or model-secret exfiltration attempt. "
+            "SOC Copilot will only provide defensive portal-security analysis, mitigation, audit, and incident-response support."
+        ),
+        "evidence": [
+            match.reason,
+            "The request was stopped before online Ollama or local GenAI execution.",
+            f"Mapped containment reference: {match.technique_id}",
+        ],
+        "recommended_actions": [
+            "Review the source session for prompt-injection attempts",
+            "Do not disclose system prompts, secrets, tool instructions, or API keys",
+            "Use Copilot only for defensive alert, attack, mitigation, and audit questions",
+        ],
+        "provider": "ai-guard",
+    }
+
+
 def _copilot_answer(question: str, alert: Alert | None) -> dict:
+    ai_attack = detect_ai_attack_text(question)
+    if ai_attack:
+        return _copilot_ai_guard_refusal(ai_attack)
     if not _is_copilot_security_question(question, alert):
         return _copilot_scope_refusal()
 

@@ -85,6 +85,7 @@ One-command Windows demo:
 - ATT&CK coverage heatmap, incident timeline replay, production connector readiness, and defensive SOC copilot in the dashboard.
 - Zero-day prevention strategy panel covering unknown-vulnerability, exploitation, execution, and disclosure/patch stages with behaviour-based controls.
 - AI-based live source blocking after anomaly/predictive scoring, with active blocklist enforcement and audit evidence.
+- AI-attack guard for prompt injection, jailbreak attempts, model/system-prompt leakage, tool-call override attempts, and API-key exfiltration prompts.
 - Open-redirect prevention for unsafe `next`, `redirect`, `url`, and return-target parameters.
 - Trusted-proxy handling for `X-Forwarded-For`, preventing direct clients from spoofing source IPs while preserving localhost multi-IP demo testing.
 - Candidate signup password policy that blocks passwords based on roll number, name, common portal terms, or other sensitive information.
@@ -133,6 +134,8 @@ SIMULATED/MOCKED:
 - `POST /demo/resume`
 
 Live request-layer detection is documented in [TESTING.md](./TESTING.md). It includes curl/PowerShell checks for SQL injection-shaped payloads, command injection-shaped payloads, path traversal, XSS, scanner User-Agents as supporting signals, endpoint enumeration, brute force, HTTP 403 block enforcement, and audit verification.
+
+AI prompt-injection and model-secret exfiltration attempts are blocked at both layers: public HTTP requests are converted into live security alerts and source IP blocks, while SOC Copilot refuses prompt-injection/jailbreak questions before sending anything to online Ollama.
 
 Production deployment boundaries and required enterprise integrations are documented in [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md).
 Hackathon positioning, demo flow, and architecture are documented in [HACKATHON_PITCH.md](./HACKATHON_PITCH.md).
