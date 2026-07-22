@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Radio } from "lucide-react";
+import { Activity, AlertTriangle, Ban, Radio } from "lucide-react";
 import type { SocAlert } from "../../lib/api";
 import { Button } from "../ui/button";
 
@@ -7,6 +7,7 @@ interface Props {
   selectedId?: string;
   onSelect: (alert: SocAlert) => void;
   onRun: (alertId: string) => void;
+  onBlock: (alertId: string) => void;
 }
 
 const severityClass: Record<string, string> = {
@@ -16,7 +17,7 @@ const severityClass: Record<string, string> = {
   critical: "border-accent bg-accent/5",
 };
 
-export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
+export function AnomalyFeed({ alerts, selectedId, onSelect, onRun, onBlock }: Props) {
   function layer(alert: SocAlert) {
     return alert.event.metadata?.detection_layer === "perimeter" || alert.event.metadata?.source === "live_traffic"
       ? "Perimeter"
@@ -97,9 +98,14 @@ export function AnomalyFeed({ alerts, selectedId, onSelect, onRun }: Props) {
                 </div>
               </dl>
             </button>
-            <Button size="sm" variant="outline" className="mt-3 h-8 border-border/70" onClick={() => onRun(alert.alert_id)}>
-              <Activity className="size-3.5" /> Run playbook
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="h-8 border-border/70" onClick={() => onRun(alert.alert_id)}>
+                <Activity className="size-3.5" /> Run playbook
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 border-border/70" onClick={() => onBlock(alert.alert_id)}>
+                <Ban className="size-3.5" /> Block source
+              </Button>
+            </div>
           </article>
         ))}
         {!alerts.length && (

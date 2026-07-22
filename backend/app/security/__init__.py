@@ -150,6 +150,9 @@ class IpBlocklist:
         self._blocked[ip] = entry
         return entry
 
+    def unblock(self, ip: str) -> dict | None:
+        return self._blocked.pop(ip, None)
+
     def snapshot(self) -> list[dict]:
         return [entry for ip, entry in list(self._blocked.items()) if self.is_blocked(ip)]
 

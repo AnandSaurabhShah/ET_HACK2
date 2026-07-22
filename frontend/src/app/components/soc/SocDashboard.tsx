@@ -4,6 +4,7 @@ import {
   alertsEventSource,
   api,
   type AuditEntry,
+  type BlockEntry,
   type ConnectorInfo,
   type CopilotAnswer,
   type IncidentTimeline,
@@ -15,6 +16,7 @@ import {
 } from "../../lib/api";
 import { AnomalyFeed } from "./AnomalyFeed";
 import { AttackAttribution } from "./AttackAttribution";
+import { ActiveBlocks } from "./ActiveBlocks";
 import { ConnectorReadiness } from "./ConnectorReadiness";
 import { PlaybookConsole } from "./PlaybookConsole";
 import { CveQueue } from "./CveQueue";
@@ -77,6 +79,7 @@ export function SocDashboard() {
   const [alerts, setAlerts] = useState<SocAlert[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [runs, setRuns] = useState<PlaybookRun[]>([]);
+  const [blocks, setBlocks] = useState<BlockEntry[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [cves, setCves] = useState<any[]>([]);
   const [graph, setGraph] = useState<any>(null);
@@ -125,10 +128,12 @@ export function SocDashboard() {
         api.cves(),
         api.graph(),
       ]);
+      const blocksRes = await api.blocks();
       setAlerts(alertsRes.items);
       setAudit(auditRes.items);
       setCves(cveRes.items);
       setGraph(graphRes);
+      setBlocks(blocksRes.items);
       const nextTimelineAlertId = timelineAlertId ?? selectedIdRef.current ?? alertsRes.items[0]?.alert_id;
       if (nextTimelineAlertId) {
         setTimeline(await api.timeline(nextTimelineAlertId));
@@ -154,6 +159,7 @@ export function SocDashboard() {
         api.connectors(),
         api.zeroDayStrategy(),
       ]);
+      const blocksRes = await api.blocks();
       setReport(reportRes);
       setAlerts(alertsRes.items);
       setAudit(auditRes.items);
@@ -162,6 +168,7 @@ export function SocDashboard() {
       setCoverage(coverageRes);
       setConnectors(connectorRes.items);
       setZeroDayStrategy(zeroDayRes);
+      setBlocks(blocksRes.items);
       const nextTimelineAlertId = selectedIdRef.current ?? alertsRes.items[0]?.alert_id;
       if (nextTimelineAlertId) {
         setTimeline(await api.timeline(nextTimelineAlertId));
@@ -229,6 +236,16 @@ export function SocDashboard() {
     await refreshDynamic(alertId);
   }
 
+  async function blockSource(alertId: string) {
+    await api.blockAlertSource(alertId);
+    await refreshDynamic(alertId);
+  }
+
+  async function unblockIp(ip: string) {
+    await api.unblockIp(ip);
+    await refreshDynamic(selected?.alert_id);
+  }
+
   async function approve(runId: string) {
     const run = await api.approvePlaybook(runId);
     setRuns((current) => current.map((item) => (item.run_id === runId ? run : item)));
@@ -281,7 +298,7 @@ export function SocDashboard() {
         <Metric icon={Gauge} label="Avg Risk Score" value={pct(liveStats.avgScore)} sub={liveStats.latest ? `${liveStats.latest.alert_id} latest` : "waiting for live attack"} />
         <Metric icon={TimerReset} label="Avg Latency" value={`${Math.round(liveStats.avgLatency)}ms`} sub={liveStats.latest ? `${Math.round(liveStats.latest.event.latency_ms)}ms latest` : "live request timing"} />
         <Metric icon={Database} label="Avg Req Bytes" value={formatBytes(liveStats.avgBytes)} sub={liveStats.latest ? `${formatBytes(requestBytes(liveStats.latest))} latest` : "live request size"} />
-        <Metric icon={ShieldCheck} label="Critical" value={`${liveStats.critical}`} sub={`${liveStats.techniques} ATT&CK techniques`} />
+        <Metric icon={ShieldCheck} label="Active Blocks" value={`${blocks.length}`} sub={`${liveStats.techniques} ATT&CK techniques`} />
         <Metric icon={Activity} label="Contained/Queued" value={`${liveStats.contained}`} sub={`baseline ${pct(report?.detection_rate)} detection`} />
       </div>
 
@@ -291,10 +308,11 @@ export function SocDashboard() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)]">
-        <AnomalyFeed alerts={alerts} selectedId={selected?.alert_id} onSelect={(a) => setSelectedId(a.alert_id)} onRun={(id) => void runPlaybook(id)} />
+        <AnomalyFeed alerts={alerts} selectedId={selected?.alert_id} onSelect={(a) => setSelectedId(a.alert_id)} onRun={(id) => void runPlaybook(id)} onBlock={(id) => void blockSource(id)} />
         <div className="grid gap-4">
           <MitreCoveragePanel coverage={coverage} />
           <AttackAttribution alert={selected} />
+          <ActiveBlocks items={blocks} onUnblock={(ip) => void unblockIp(ip)} />
           <ZeroDayPrevention strategy={zeroDayStrategy} />
           <IncidentTimelinePanel timeline={timeline} />
           <SocCopilot alert={selected} answer={copilot} onAsk={askCopilot} />

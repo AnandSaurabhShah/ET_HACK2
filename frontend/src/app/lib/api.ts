@@ -75,6 +75,15 @@ export interface PlaybookRun {
   steps: { name: string; action: string; blast_radius: number; status: string; verified?: boolean; details?: string }[];
 }
 
+export interface BlockEntry {
+  ip: string;
+  technique_id: string;
+  reason: string;
+  confidence: number;
+  blocked_at: number;
+  expires_at: number;
+}
+
 export interface AuditEntry {
   index: number;
   timestamp: string;
@@ -148,6 +157,9 @@ export const api = {
   connectors: () => request<ApiList<ConnectorInfo>>("/integrations/connectors"),
   askCopilot: (question: string, alertId?: string) =>
     request<CopilotAnswer>("/copilot/ask", { method: "POST", body: JSON.stringify({ question, alert_id: alertId }) }),
+  blocks: () => request<ApiList<BlockEntry>>("/blocks"),
+  blockAlertSource: (alertId: string) => request<{ blocked: boolean; entry: BlockEntry; alert: SocAlert }>(`/alerts/${alertId}/block-source`, { method: "POST" }),
+  unblockIp: (ip: string) => request<{ removed: boolean; ip: string }>(`/blocks/${encodeURIComponent(ip)}/unblock`, { method: "POST" }),
   cves: () => request<ApiList<any>>("/cve-queue"),
   graph: () => request<any>("/twin/graph"),
   simulateTwin: () => request<any>("/twin/simulate", { method: "POST" }),

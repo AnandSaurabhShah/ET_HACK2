@@ -64,6 +64,7 @@ MIDDLEWARE_SKIP_PREFIXES = ("/alerts/stream",)
 LOCAL_SOC_READ_PREFIXES = (
     "/alerts",
     "/audit",
+    "/blocks",
     "/ready",
     "/eval/report",
     "/cve-queue",
@@ -246,6 +247,8 @@ def _signal_to_event(
 
 
 def _block_ip_once(ip: str, signal: SignatureMatch | RateSignal, request_id: str) -> dict:
+    if GLOBAL_BLOCKLIST.is_blocked(ip):
+        return next((entry for entry in GLOBAL_BLOCKLIST.snapshot() if entry["ip"] == ip), {})
     entry = GLOBAL_BLOCKLIST.block(
         ip,
         technique_id=signal.technique_id,
@@ -264,6 +267,41 @@ def _block_ip_once(ip: str, signal: SignatureMatch | RateSignal, request_id: str
             "family": getattr(signal, "family", "behavioral_rate"),
         },
     )
+    return entry
+
+
+def _block_alert_source(alert: Alert, actor: str, reason: str | None = None) -> dict:
+    ip = alert.event.ip
+    technique = alert.attribution.techniques[0].id
+    if GLOBAL_BLOCKLIST.is_blocked(ip):
+        entry = next((row for row in GLOBAL_BLOCKLIST.snapshot() if row["ip"] == ip), {})
+    else:
+        entry = GLOBAL_BLOCKLIST.block(
+            ip,
+            technique_id=technique,
+            reason=reason or f"Live alert {alert.alert_id} exceeded behavioural containment threshold.",
+            confidence=alert.attribution.confidence,
+        )
+        audit.append(
+            actor=actor,
+            action="block_ip",
+            justification=f"Blocked {ip} for alert {alert.alert_id} mapped to {technique}.",
+            blast_radius=2,
+            payload={**entry, "alert_id": alert.alert_id, "event_id": alert.event.event_id, "universal_live_containment": True},
+        )
+    alert.event.metadata = {
+        **alert.event.metadata,
+        "active_mitigation": {
+            "blocked": True,
+            "ip": ip,
+            "technique_id": technique,
+            "expires_at": entry.get("expires_at"),
+            "actor": actor,
+        },
+    }
+    alert.status = "queued" if alert.severity in {"high", "critical"} else "contained"
+    upsert_alert(alert.model_dump())
+    write_json(ALERTS_PATH, [a.model_dump() for a in ALERTS])
     return entry
 
 
@@ -538,6 +576,12 @@ def process_telemetry_event(event: TelemetryEvent) -> dict:
             blast_radius=1,
             payload={"event_id": event.event_id, "alert_id": alert_id},
         )
+        if event.metadata.get("source") == "live_traffic":
+            _block_alert_source(
+                ALERTS[0],
+                actor="active_containment",
+                reason="Universal live-attack containment: any detected live attack is blocked at the source.",
+            )
     return {
         "accepted": True,
         "score": round(score, 3),
@@ -553,6 +597,8 @@ def run_orchestrator_for_alert(alert_id: str, actor: str) -> None:
         return
     run = orchestrator_agent.run(alert)
     alert.status = "queued" if run.status == "queued_for_approval" else "contained"
+    if alert.event.metadata.get("source") == "live_traffic":
+        _block_alert_source(alert, actor=actor, reason=f"SOAR playbook containment for {alert_id}.")
     upsert_alert(alert.model_dump())
     write_json(ALERTS_PATH, [a.model_dump() for a in ALERTS])
     audit.append(
@@ -833,6 +879,33 @@ async def resume_demo() -> dict:
 @app.get("/demo/status")
 def get_demo_status() -> dict:
     return demo_status()
+
+
+@app.get("/blocks")
+def get_blocks() -> dict:
+    return {"items": GLOBAL_BLOCKLIST.snapshot(), "total": len(GLOBAL_BLOCKLIST.snapshot())}
+
+
+@app.post("/blocks/{ip}/unblock", dependencies=[OperatorAuth])
+def unblock_ip(ip: str) -> dict:
+    entry = GLOBAL_BLOCKLIST.unblock(ip)
+    audit.append(
+        actor="security_operator",
+        action="unblock_ip",
+        justification=f"Operator removed block for {ip}.",
+        blast_radius=1,
+        payload={"ip": ip, "previous_entry": entry},
+    )
+    return {"removed": entry is not None, "ip": ip}
+
+
+@app.post("/alerts/{alert_id}/block-source", dependencies=[OperatorAuth])
+def block_alert_source(alert_id: str) -> dict:
+    alert = _alert_by_id(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    entry = _block_alert_source(alert, actor="security_operator", reason=f"Operator manually blocked source for {alert_id}.")
+    return {"blocked": True, "entry": entry, "alert": alert.model_dump()}
 
 
 @app.post("/simulate/attack/{technique_id}", dependencies=[OperatorAuth])
