@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: aegis-cni-api
+    env: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python seed.py
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: AEGIS_ENV
+        value: production
+      - key: AEGIS_DATABASE_URL
+        sync: false
+      - key: AEGIS_API_KEY
+        sync: false
+      - key: AEGIS_CORS_ORIGINS
+        sync: false
+      - key: AEGIS_DEMO_BACKGROUND_ENABLED
+        value: false
+      - key: AEGIS_TRUSTED_PROXY_IPS
+        value: 0.0.0.0/0,::/0
+      - key: AEGIS_ALLOWED_REDIRECT_HOSTS
+        sync: false
+      - key: AEGIS_GENAI_PROVIDER
+        value: auto
+      - key: AEGIS_GENAI_ONLINE_PROVIDER
+        value: ollama
+      - key: AEGIS_GENAI_ONLINE_ENDPOINT
+        value: https://ollama.com/api/generate
+      - key: AEGIS_GENAI_ONLINE_MODEL
+        value: gpt-oss:20b-cloud
+      - key: AEGIS_GENAI_ONLINE_API_KEY
+        sync: false
+      - key: AEGIS_GENAI_ENDPOINT
+        value: http://127.0.0.1:11434/api/generate
+      - key: AEGIS_GENAI_MODEL
+        value: aegis-cni:latest
+
+  - type: static
+    name: aegis-cni-portal
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_AEGIS_API_URL
+        sync: false
+      - key: VITE_AEGIS_API_KEY
+        sync: false
