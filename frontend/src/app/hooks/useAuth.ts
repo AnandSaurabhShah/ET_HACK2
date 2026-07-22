@@ -17,6 +17,14 @@ const DEMO_ACCOUNTS: Record<
   security: [{ id: "SOC-AEGIS-001", password: "security", name: "Aegis-CNI Operator" }],
 };
 
+export interface LoginResult {
+  ok: boolean;
+  error?: string;
+  mfaRequired?: boolean;
+  challengeId?: string;
+  demoCode?: string;
+}
+
 function generateSessionId(): string {
   return "SESS-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -42,13 +50,29 @@ export function useAuth() {
   }
 
   const login = useCallback(
-    (role: Role, id: string, password: string): { ok: boolean; error?: string } => {
+    async (role: Role, id: string, password: string, otp?: string, challengeId?: string): Promise<LoginResult> => {
       const match = DEMO_ACCOUNTS[role].find(
         (a) => a.id.toLowerCase() === id.trim().toLowerCase() && a.password === password,
       );
       if (!match) {
         emitAuthEvent("login", role, id.trim(), false, { reason: "invalid_credentials" });
         return { ok: false, error: "Invalid credentials for the selected role." };
+      }
+      if (!otp || !challengeId) {
+        const challenge = await api.startMfa({ user_id: match.id, role });
+        emitAuthEvent("mfa_challenge", role, match.id, true, { challenge_id: challenge.challenge_id, delivery: challenge.delivery });
+        return {
+          ok: false,
+          mfaRequired: true,
+          challengeId: challenge.challenge_id,
+          demoCode: challenge.demo_code,
+          error: "Enter the two-factor authentication code to continue.",
+        };
+      }
+      const verified = await api.verifyMfa({ challenge_id: challengeId, user_id: match.id, role, code: otp });
+      if (!verified.ok) {
+        emitAuthEvent("mfa_verify", role, match.id, false, { reason: verified.reason, challenge_id: challengeId });
+        return { ok: false, error: verified.reason ?? "Invalid two-factor authentication code." };
       }
       const nextSession = {
         userId: match.id,
@@ -57,7 +81,7 @@ export function useAuth() {
         displayName: match.name,
       };
       setSession(nextSession);
-      emitAuthEvent("login", role, match.id, true, { session_id: nextSession.sessionId });
+      emitAuthEvent("login", role, match.id, true, { session_id: nextSession.sessionId, mfa: true });
       return { ok: true };
     },
     [],
@@ -65,9 +89,13 @@ export function useAuth() {
 
   // Only candidates may self-register; staff accounts are institution-provisioned.
   const registerCandidate = useCallback(
-    (id: string, password: string, name: string): { ok: boolean; error?: string } => {
+    async (id: string, password: string, name: string): Promise<{ ok: boolean; error?: string }> => {
       if (DEMO_ACCOUNTS.candidate.some((a) => a.id.toLowerCase() === id.trim().toLowerCase())) {
         return { ok: false, error: "An account with this roll number already exists." };
+      }
+      const policy = await api.passwordPolicy({ user_id: id.trim(), password, name });
+      if (!policy.ok) {
+        return { ok: false, error: policy.reasons.join(" ") };
       }
       DEMO_ACCOUNTS.candidate.push({ id: id.trim(), password, name });
       const nextSession = {

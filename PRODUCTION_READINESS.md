@@ -6,6 +6,11 @@ This repo now implements a production-shaped SOC pipeline, but a true enterprise
 
 - Always-on FastAPI request middleware for every inbound HTTP request.
 - Real HTTP 403 mitigation through an in-memory perimeter blocklist with expiry.
+- AI containment agent blocks live malicious source IPs after anomaly/predictive scoring confirms a high-confidence alert.
+- Trusted-proxy source attribution prevents direct clients from spoofing `X-Forwarded-For`; production deployments must set `AEGIS_TRUSTED_PROXY_IPS` to the real WAF/load-balancer ranges.
+- Open-redirect guard rejects unsafe external, protocol-relative, JavaScript, data, and control-character redirect targets before route handling.
+- Candidate password policy rejects passwords that reuse roll number, name, email handle, phone suffix, or common exam-portal terms.
+- Demo two-factor authentication challenge endpoints are implemented; replace demo OTP disclosure with SMS, email, authenticator app, or institutional IAM MFA in production.
 - Signature detection for SQL injection, command injection, path traversal, XSS, scanner User-Agent support signals, and oversized requests.
 - Sliding-window behavioural detection for request bursts, endpoint enumeration, and failed login pressure.
 - Unsupervised anomaly detection with IsolationForest and z-score deviation from normal baselines.
@@ -18,6 +23,7 @@ This repo now implements a production-shaped SOC pipeline, but a true enterprise
 - Live NVD CVE cache with static fallback.
 - Hash-chained audit log with verification endpoint.
 - Live-only SOC dashboard feed; seeded/eval data trains and validates the model but does not appear as current incidents.
+- Cyber-resilience digital twin with asset criticality, live alert pressure, attack-path what-if simulation, control mapping, and post-containment risk projection.
 
 ## Pattern-Based Detection
 

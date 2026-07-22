@@ -28,12 +28,13 @@ import { Label } from "./ui/label";
 import { Button } from "./ui/button";
 import { PasswordField } from "./PasswordField";
 import heroImage from "../../assets/exam-operations-hero.png";
+import type { LoginResult } from "../hooks/useAuth";
 
 type Mode = "login" | "signup" | "reset";
 
 interface AuthScreenProps {
-  onLogin: (role: Role, id: string, password: string) => { ok: boolean; error?: string };
-  onRegister: (id: string, password: string, name: string) => { ok: boolean; error?: string };
+  onLogin: (role: Role, id: string, password: string, otp?: string, challengeId?: string) => Promise<LoginResult>;
+  onRegister: (id: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   onVerifyCertificate: () => void;
 }
 
@@ -101,6 +102,10 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [otp, setOtp] = useState("");
+  const [mfaChallengeId, setMfaChallengeId] = useState<string | null>(null);
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -111,6 +116,9 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
     setName("");
     setPassword("");
     setConfirm("");
+    setOtp("");
+    setMfaChallengeId(null);
+    setDemoOtp(null);
     setError(null);
     setNotice(null);
   }
@@ -121,7 +129,7 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
     reset();
   }
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setNotice(null);
@@ -143,15 +151,16 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
         setError("Full name is required.");
         return;
       }
-      if (password.length < 8) {
-        setError("Password must be at least 8 characters.");
+      if (password.length < 12) {
+        setError("Password must be at least 12 characters and must not reuse your name or roll number.");
         return;
       }
       if (password !== confirm) {
         setError("Passwords do not match.");
         return;
       }
-      const result = onRegister(cleanId, password, name.trim());
+      setBusy(true);
+      const result = await onRegister(cleanId, password, name.trim()).finally(() => setBusy(false));
       if (!result.ok) setError(result.error ?? "Registration failed.");
       return;
     }
@@ -160,7 +169,18 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
       setError("Password is required.");
       return;
     }
-    const result = onLogin(role, cleanId, password);
+    if (mfaChallengeId && otp.length !== 6) {
+      setError("Enter the 6-digit two-factor authentication code.");
+      return;
+    }
+    setBusy(true);
+    const result = await onLogin(role, cleanId, password, otp || undefined, mfaChallengeId || undefined).finally(() => setBusy(false));
+    if (result.mfaRequired) {
+      setMfaChallengeId(result.challengeId ?? null);
+      setDemoOtp(result.demoCode ?? null);
+      setNotice(`Two-factor code sent through demo delivery${result.demoCode ? `: ${result.demoCode}` : "."}`);
+      return;
+    }
     if (!result.ok) setError(result.error ?? "Login failed.");
   }
 
@@ -415,7 +435,12 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
                 <Input
                   id="auth-id"
                   value={id}
-                  onChange={(event) => setId(event.target.value)}
+                  onChange={(event) => {
+                    setId(event.target.value);
+                    setOtp("");
+                    setMfaChallengeId(null);
+                    setDemoOtp(null);
+                  }}
                   placeholder={meta.idPlaceholder}
                   autoComplete="username"
                   className="border-border/70 bg-input-background pl-9 font-mono text-[13px] focus-visible:border-ring focus-visible:ring-ring/40"
@@ -447,9 +472,32 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
                 id="auth-password"
                 label="Password"
                 value={password}
-                onChange={setPassword}
+                onChange={(value) => {
+                  setPassword(value);
+                  setOtp("");
+                  setMfaChallengeId(null);
+                  setDemoOtp(null);
+                }}
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
               />
+            )}
+
+            {mode === "login" && mfaChallengeId && (
+              <div className="grid gap-2">
+                <Label htmlFor="auth-otp" className="text-[13px] text-foreground">
+                  Two-Factor Code
+                </Label>
+                <Input
+                  id="auth-otp"
+                  value={otp}
+                  onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="6-digit OTP"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  className="border-border/70 bg-input-background font-mono tracking-[0.28em] focus-visible:border-ring focus-visible:ring-ring/40"
+                />
+                {demoOtp && <p className="text-[11px] text-muted-foreground">Demo OTP: {demoOtp}</p>}
+              </div>
             )}
 
             {mode === "signup" && (
@@ -476,8 +524,14 @@ export function AuthScreen({ onLogin, onRegister, onVerifyCertificate }: AuthScr
               </p>
             )}
 
-            <Button type="submit" className="mt-1 w-full bg-primary text-primary-foreground hover:brightness-110 active:brightness-95">
-              {mode === "login" && "Sign in"}
+            {mode === "signup" && (
+              <p className="rounded-sm bg-muted px-3 py-2 text-[12px] text-muted-foreground">
+                Passwords cannot include your roll number, name, common exam terms, or other sensitive personal details.
+              </p>
+            )}
+
+            <Button type="submit" disabled={busy} className="mt-1 w-full bg-primary text-primary-foreground hover:brightness-110 active:brightness-95">
+              {mode === "login" && (mfaChallengeId ? "Verify code and sign in" : "Continue with password")}
               {mode === "signup" && "Create account"}
               {mode === "reset" && "Send reset instructions"}
             </Button>

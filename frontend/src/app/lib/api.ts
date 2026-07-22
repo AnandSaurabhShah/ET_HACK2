@@ -133,6 +133,23 @@ export interface CopilotAnswer {
   fallback_reason?: string;
 }
 
+export interface PasswordPolicyResult {
+  ok: boolean;
+  reasons: string[];
+}
+
+export interface MfaStartResult {
+  challenge_id: string;
+  expires_at: number;
+  delivery: string;
+  demo_code?: string;
+}
+
+export interface MfaVerifyResult {
+  ok: boolean;
+  reason?: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -157,6 +174,12 @@ export const api = {
   connectors: () => request<ApiList<ConnectorInfo>>("/integrations/connectors"),
   askCopilot: (question: string, alertId?: string) =>
     request<CopilotAnswer>("/copilot/ask", { method: "POST", body: JSON.stringify({ question, alert_id: alertId }) }),
+  passwordPolicy: (body: { user_id: string; password: string; name?: string; email?: string; phone?: string }) =>
+    request<PasswordPolicyResult>("/auth/password-policy", { method: "POST", body: JSON.stringify(body) }),
+  startMfa: (body: { user_id: string; role: string }) =>
+    request<MfaStartResult>("/auth/mfa/start", { method: "POST", body: JSON.stringify(body) }),
+  verifyMfa: (body: { challenge_id: string; user_id: string; role: string; code: string }) =>
+    request<MfaVerifyResult>("/auth/mfa/verify", { method: "POST", body: JSON.stringify(body) }),
   blocks: () => request<ApiList<BlockEntry>>("/blocks"),
   blockAlertSource: (alertId: string) => request<{ blocked: boolean; entry: BlockEntry; alert: SocAlert }>(`/alerts/${alertId}/block-source`, { method: "POST" }),
   unblockIp: (ip: string) => request<{ removed: boolean; ip: string }>(`/blocks/${encodeURIComponent(ip)}/unblock`, { method: "POST" }),

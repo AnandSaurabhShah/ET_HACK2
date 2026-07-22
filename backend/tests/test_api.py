@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.agents.genai_attribution import GenAIAttributionProvider
 from app.main import app
+from app.security.policy import extract_forwarded_ip, is_trusted_proxy, unsafe_redirect_target, validate_password_strength
 
 
 def test_health_and_eval_report() -> None:
@@ -49,7 +50,10 @@ def test_core_read_endpoints() -> None:
     with TestClient(app) as client:
         assert client.get("/alerts?limit=2").status_code == 200
         assert client.get("/cve-queue").status_code == 200
-        assert client.get("/twin/graph").status_code == 200
+        twin = client.get("/twin/graph")
+        assert twin.status_code == 200
+        assert "risk" in twin.json()["nodes"][0]
+        assert "controls" in twin.json()["nodes"][0]
         assert client.get("/audit?limit=2").status_code == 200
         assert client.get("/audit/verify").status_code == 200
         coverage = client.get("/coverage/mitre")
@@ -71,6 +75,63 @@ def test_core_read_endpoints() -> None:
         resumed = client.post("/demo/resume")
         assert resumed.status_code == 200
         assert resumed.json()["paused"] is False
+
+
+def test_auth_policy_rejects_sensitive_passwords_and_mfa_verifies() -> None:
+    with TestClient(app) as client:
+        weak = client.post(
+            "/auth/password-policy",
+            json={"user_id": "CAND-2026-123456", "name": "Anand Shah", "password": "Anand@123456"},
+            headers={"X-Forwarded-For": "198.51.100.31"},
+        )
+        assert weak.status_code == 200
+        assert weak.json()["ok"] is False
+
+        strong = client.post(
+            "/auth/password-policy",
+            json={"user_id": "CAND-2026-123456", "name": "Anand Shah", "password": "River!Quartz!47"},
+            headers={"X-Forwarded-For": "198.51.100.32"},
+        )
+        assert strong.status_code == 200
+        assert strong.json()["ok"] is True
+
+        challenge = client.post(
+            "/auth/mfa/start",
+            json={"user_id": "CAND-2026-123456", "role": "candidate"},
+            headers={"X-Forwarded-For": "198.51.100.33"},
+        ).json()
+        verified = client.post(
+            "/auth/mfa/verify",
+            json={
+                "challenge_id": challenge["challenge_id"],
+                "user_id": "CAND-2026-123456",
+                "role": "candidate",
+                "code": challenge["demo_code"],
+            },
+            headers={"X-Forwarded-For": "198.51.100.34"},
+        )
+        assert verified.status_code == 200
+        assert verified.json()["ok"] is True
+
+
+def test_redirect_and_ip_spoofing_policy_helpers() -> None:
+    assert unsafe_redirect_target("https://evil.example/login", {"localhost", "127.0.0.1"}) is not None
+    assert unsafe_redirect_target("/candidate/dashboard", {"localhost", "127.0.0.1"}) is None
+    assert extract_forwarded_ip("198.51.100.88, 10.0.0.1") == "198.51.100.88"
+    assert extract_forwarded_ip("not-an-ip") is None
+    assert is_trusted_proxy("127.0.0.1", {"127.0.0.1"}) is True
+    assert is_trusted_proxy("198.51.100.8", {"127.0.0.1"}) is False
+    assert validate_password_strength("Candidate@1234", user_id="CAND-2026-1234", name="Test User")["ok"] is False
+
+
+def test_unauthorized_redirect_is_blocked_as_live_attack() -> None:
+    with TestClient(app) as client:
+        ip = "198.51.100.35"
+        blocked = client.get("/health?next=https://evil.example", headers={"X-Forwarded-For": ip})
+        assert blocked.status_code == 400
+        assert "redirect" in blocked.text.lower()
+        follow_up = client.get("/health", headers={"X-Forwarded-For": ip})
+        assert follow_up.status_code == 403
 
 
 def test_perimeter_signature_blocks_follow_up_request() -> None:

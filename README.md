@@ -84,6 +84,11 @@ One-command Windows demo:
 - `RESULTS.md` generated from the eval harness, not hand-entered metrics.
 - ATT&CK coverage heatmap, incident timeline replay, production connector readiness, and defensive SOC copilot in the dashboard.
 - Zero-day prevention strategy panel covering unknown-vulnerability, exploitation, execution, and disclosure/patch stages with behaviour-based controls.
+- AI-based live source blocking after anomaly/predictive scoring, with active blocklist enforcement and audit evidence.
+- Open-redirect prevention for unsafe `next`, `redirect`, `url`, and return-target parameters.
+- Trusted-proxy handling for `X-Forwarded-For`, preventing direct clients from spoofing source IPs while preserving localhost multi-IP demo testing.
+- Candidate signup password policy that blocks passwords based on roll number, name, common portal terms, or other sensitive information.
+- Two-factor authentication challenge flow for portal login; demo delivery returns a visible OTP, while production can wire the same endpoint to SMS, email, or TOTP.
 
 ## What's Real vs. Simulated
 
@@ -108,6 +113,9 @@ SIMULATED/MOCKED:
 ## API
 
 - `POST /ingest/events`
+- `POST /auth/password-policy`
+- `POST /auth/mfa/start`
+- `POST /auth/mfa/verify`
 - `GET /alerts/stream`
 - `GET /alerts`
 - `GET /attribution/{alert_id}`

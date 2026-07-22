@@ -27,10 +27,11 @@ from app.ingest.attack_simulation import build_attack_event, find_technique
 from app.ingest.nvd_client import refresh_nvd_cache
 from app.ingest.synth_generator import generate_events
 from app.integrations.connectors import connector_catalog
-from app.models.schemas import Alert, CopilotQuestion, RawEvent, TelemetryEvent
+from app.models.schemas import Alert, CopilotQuestion, MfaStartRequest, MfaVerifyRequest, PasswordPolicyRequest, RawEvent, TelemetryEvent
 from app.paths import ALERTS_PATH, EVAL_REPORT_PATH, EVENTS_PATH, ensure_dirs
 from app.storage import append_jsonl, read_json, read_jsonl, utc_now, write_json, write_jsonl
 from app.security import GLOBAL_BLOCKLIST, GLOBAL_RATE_TRACKER, OperatorAuth, RateSignal, check_ingest_rate_limit
+from app.security.policy import MfaStore, extract_forwarded_ip, is_trusted_proxy, unsafe_redirect_target, validate_password_strength
 from app.security.signatures import SignatureMatch, scan_request
 from app.agents.zero_day_strategy import zero_day_prevention_strategy
 
@@ -52,6 +53,7 @@ risk_agent = PredictiveRiskAgent(threshold=settings.predictive_risk_threshold)
 orchestrator_agent = OrchestratorAgent(audit=audit, blast_threshold=settings.high_blast_radius_threshold)
 cve_agent = CveAgent()
 graph_agent = GraphAgent()
+MFA_STORE = MfaStore()
 EVENTS: list[TelemetryEvent] = []
 ALERTS: list[Alert] = []
 DEMO_TASK: asyncio.Task | None = None
@@ -82,6 +84,8 @@ ACTIVE_LIVE_TECHNIQUES = {
     "T1110": "failed-login/brute-force pressure",
     "T1189": "XSS-shaped request detection",
     "T1190": "SQLi/public-app exploit-shaped request detection",
+    "T1036": "client source masquerading / spoofed forwarding header detection",
+    "T1557": "unauthorized redirect / adversary-in-the-middle prevention",
     "T1499": "oversized/malformed request pressure",
     "T1595": "request burst and endpoint enumeration",
 }
@@ -101,11 +105,45 @@ def _load_alerts() -> list[Alert]:
     return [Alert.model_validate(row) for row in rows]
 
 
+def peer_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _trusted_proxy_peer(request: Request) -> bool:
+    return is_trusted_proxy(peer_ip(request), settings.trusted_proxy_set)
+
+
 def client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
-    return request.client.host if request.client else "unknown"
+    if forwarded and _trusted_proxy_peer(request):
+        return extract_forwarded_ip(forwarded) or peer_ip(request)
+    return peer_ip(request)
+
+
+def _spoofing_signal(request: Request) -> SignatureMatch | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if not forwarded:
+        return None
+    if _trusted_proxy_peer(request) and extract_forwarded_ip(forwarded):
+        return None
+    return SignatureMatch(
+        family="ip_spoofing",
+        technique_id="T1036",
+        event_type="ip_spoofing_attempt",
+        confidence=0.89,
+        reason="Untrusted or malformed X-Forwarded-For source header was ignored.",
+        block_immediately=True,
+    )
+
+
+def _redirect_violation(request: Request) -> tuple[str, str] | None:
+    for key, value in request.query_params.multi_items():
+        if key.lower() not in {"next", "redirect", "redirect_uri", "return", "return_to", "url", "continue"}:
+            continue
+        reason = unsafe_redirect_target(value, settings.allowed_redirect_host_set)
+        if reason:
+            return key, reason
+    return None
 
 
 def _allow_local_blocked_soc_read(request: Request, ip: str, path: str) -> bool:
@@ -316,6 +354,41 @@ async def live_request_detection_middleware(request: Request, call_next):
     start = time.perf_counter()
     path = request.url.path
     ip = client_ip(request)
+    redirect_issue = _redirect_violation(request)
+    if redirect_issue:
+        key, reason = redirect_issue
+        signal = SignatureMatch(
+            family="open_redirect",
+            technique_id="T1557",
+            event_type="unauthorized_redirect_attempt",
+            confidence=0.91,
+            reason=f"Blocked unsafe redirect parameter {key}: {reason}",
+            block_immediately=True,
+        )
+        header_size = _headers_size(request)
+        event = _signal_to_event(
+            request=request,
+            ip=ip,
+            method=request.method,
+            path=path,
+            status_code=400,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            response_size=43,
+            request_size=header_size + len(str(request.url.query or "")),
+            header_size=header_size,
+            body_size=0,
+            body_text="",
+            user_agent=request.headers.get("user-agent", ""),
+            user_id="anonymous",
+            role="system",
+            signal=signal,
+            source="live_traffic",
+        )
+        result = process_telemetry_event(event)
+        _block_ip_once(ip, signal, event.event_id)
+        if result.get("alert_id"):
+            run_orchestrator_for_alert(result["alert_id"], "perimeter_middleware")
+        return PlainTextResponse("Blocked unauthorized redirect target.", status_code=400)
     if _allow_local_blocked_soc_read(request, ip, path):
         return await call_next(request)
     if GLOBAL_BLOCKLIST.is_blocked(ip) and not _allow_local_blocked_soc_read(request, ip, path):
@@ -375,6 +448,9 @@ async def live_request_detection_middleware(request: Request, call_next):
     request_size = header_size + len(body) + len(str(request.url.query or ""))
     request_text = _captured_text(request, body_text)
     signature_matches = scan_request(request_text, user_agent, header_size, len(body))
+    spoofing_signal = _spoofing_signal(request)
+    if spoofing_signal:
+        signature_matches.insert(0, spoofing_signal)
     rate_result = GLOBAL_RATE_TRACKER.record_request(ip, path, failed_login, target_user_id)
     supporting_scanner_only = signature_matches and all(match.family == "scanner_user_agent" for match in signature_matches)
     signals: list[SignatureMatch | RateSignal] = []
@@ -497,6 +573,56 @@ def ready() -> dict:
     }
 
 
+@app.post("/auth/password-policy")
+def password_policy(payload: PasswordPolicyRequest) -> dict:
+    result = validate_password_strength(
+        payload.password,
+        user_id=payload.user_id,
+        name=payload.name,
+        email=payload.email,
+        phone=payload.phone,
+    )
+    audit.append(
+        actor="auth_policy",
+        action="validate_password_policy",
+        justification="Candidate signup password was checked against strength and sensitive-information reuse rules.",
+        blast_radius=0,
+        payload={"user_id": payload.user_id, "ok": result["ok"], "reason_count": len(result["reasons"])},
+    )
+    return result
+
+
+@app.post("/auth/mfa/start")
+def mfa_start(payload: MfaStartRequest) -> dict:
+    challenge = MFA_STORE.start(user_id=payload.user_id, role=payload.role)
+    audit.append(
+        actor="auth_policy",
+        action="start_mfa_challenge",
+        justification="Two-factor authentication challenge issued for portal sign-in.",
+        blast_radius=0,
+        payload={"user_id": payload.user_id, "role": payload.role, "challenge_id": challenge["challenge_id"], "delivery": challenge["delivery"]},
+    )
+    return challenge
+
+
+@app.post("/auth/mfa/verify")
+def mfa_verify(payload: MfaVerifyRequest) -> dict:
+    result = MFA_STORE.verify(
+        challenge_id=payload.challenge_id,
+        code=payload.code,
+        user_id=payload.user_id,
+        role=payload.role,
+    )
+    audit.append(
+        actor="auth_policy",
+        action="verify_mfa_challenge",
+        justification="Two-factor authentication code was verified before issuing a demo session.",
+        blast_radius=0,
+        payload={"user_id": payload.user_id, "role": payload.role, "challenge_id": payload.challenge_id, "ok": result["ok"]},
+    )
+    return result
+
+
 @app.post("/ingest/events", status_code=202)
 def ingest_event(raw: RawEvent, request: Request, _: None = Depends(check_ingest_rate_limit)) -> dict:
     return process_event(raw)
@@ -575,8 +701,11 @@ def process_telemetry_event(event: TelemetryEvent) -> dict:
         if event.metadata.get("source") == "live_traffic":
             _block_alert_source(
                 ALERTS[0],
-                actor="active_containment",
-                reason="Universal live-attack containment: any detected live attack is blocked at the source.",
+                actor="ai_containment_agent",
+                reason=(
+                    "AI live-attack containment: anomaly/predictive model decision "
+                    f"{decision_score:.2f} mapped to {attribution.techniques[0].id}; source blocked."
+                ),
             )
     return {
         "accepted": True,
@@ -1154,7 +1283,7 @@ def cve_queue(source: str | None = "live_traffic") -> dict:
 
 @app.get("/twin/graph")
 def twin_graph() -> dict:
-    return graph_agent.export()
+    return graph_agent.export(ALERTS, GLOBAL_BLOCKLIST.snapshot())
 
 
 @app.post("/twin/simulate", dependencies=[OperatorAuth])
@@ -1162,11 +1291,11 @@ def twin_simulate() -> dict:
     audit.append(
         actor="graph_agent",
         action="simulate_attack_path",
-        justification="Operator requested labelled digital-twin attack path simulation.",
+        justification="Operator requested digital-twin what-if simulation with live alert pressure and containment controls.",
         blast_radius=0,
         payload={"model_only": True},
     )
-    return graph_agent.simulate()
+    return graph_agent.simulate(ALERTS, GLOBAL_BLOCKLIST.snapshot())
 
 
 @app.get("/audit")

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     ingest_rate_limit_per_minute: int = Field(default=180, alias="AEGIS_INGEST_RATE_LIMIT_PER_MINUTE")
     high_blast_radius_threshold: int = Field(default=6, alias="AEGIS_HIGH_BLAST_RADIUS_THRESHOLD")
     perimeter_block_cooldown_seconds: int = Field(default=900, alias="AEGIS_PERIMETER_BLOCK_COOLDOWN_SECONDS")
+    trusted_proxy_ips: str = Field(default="127.0.0.1,::1,testclient", alias="AEGIS_TRUSTED_PROXY_IPS")
+    allowed_redirect_hosts: str = Field(default="localhost,127.0.0.1", alias="AEGIS_ALLOWED_REDIRECT_HOSTS")
     demo_background_enabled: bool = Field(default=False, alias="AEGIS_DEMO_BACKGROUND_ENABLED")
     predictive_risk_threshold: float = Field(default=0.58, alias="AEGIS_PREDICTIVE_RISK_THRESHOLD")
     genai_provider: str = Field(default="auto", alias="AEGIS_GENAI_PROVIDER")
@@ -34,6 +36,19 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def trusted_proxy_set(self) -> set[str]:
+        return {item.strip().lower() for item in self.trusted_proxy_ips.split(",") if item.strip()}
+
+    @property
+    def allowed_redirect_host_set(self) -> set[str]:
+        hosts = {item.strip().lower() for item in self.allowed_redirect_hosts.split(",") if item.strip()}
+        for origin in self.cors_origin_list:
+            host = origin.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
+            if host:
+                hosts.add(host)
+        return hosts
 
 
 @lru_cache

@@ -30,6 +30,26 @@ class CopilotQuestion(BaseModel):
     alert_id: str | None = None
 
 
+class PasswordPolicyRequest(BaseModel):
+    user_id: str
+    password: str
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+
+
+class MfaStartRequest(BaseModel):
+    user_id: str
+    role: str
+
+
+class MfaVerifyRequest(BaseModel):
+    challenge_id: str
+    user_id: str
+    role: str
+    code: str
+
+
 class TelemetryEvent(RawEvent):
     event_id: str
     timestamp: datetime
